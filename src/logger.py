@@ -1,4 +1,4 @@
-import logging, datetime
+import logging
 import torch.multiprocessing as mp
 from logging import Formatter, FileHandler, StreamHandler
 from logging.handlers import QueueHandler, QueueListener
@@ -28,10 +28,7 @@ def get_logger(log_file_path):
     logger = mp.Queue(-1)
 
     formatter = Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt = "%Y-%m-%d,%H:%M:%S")
-    ## change the time to local time
-    import pytz
-    formatter.converter = lambda *args: datetime.datetime.fromtimestamp(args[0], tz=pytz.timezone('US/Pacific')).timetuple()
-
+    
     file_handler = FileHandler(log_file_path, "w+")
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)

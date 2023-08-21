@@ -83,10 +83,11 @@ def worker(rank, options, logger):
         scheduler = cosine_scheduler(optimizer, options.lr, options.num_warmup_steps, data["train"].num_batches * options.epochs)
 
     start_epoch = 0
+    # import ipdb; ipdb.set_trace()
     if(options.checkpoint is not None):
         if(os.path.isfile(options.checkpoint)):
             checkpoint = torch.load(options.checkpoint, map_location = options.device)
-            start_epoch = checkpoint["epoch"]
+            start_epoch = 0 if options.complete_finetune else checkpoint['epoch'] 
             state_dict = checkpoint["state_dict"]
             if(not options.distributed and next(iter(state_dict.items()))[0].startswith("module")):
                 state_dict = {key[len("module."):]: value for key, value in state_dict.items()}
@@ -111,7 +112,10 @@ def worker(rank, options, logger):
 
     if(options.wandb and options.master):
         logging.debug("Starting wandb")
-        wandb.init(project = "clip-defense", notes = options.notes, tags = [], config = vars(options))
+        project_name = "clip-defense"
+        if options.complete_finetune:
+            project_name = "clip-defense-complete-finetune2"
+        wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
         wandb.run.name = options.name
         wandb.save(os.path.join(options.log_dir_path, "params.txt"))
 
@@ -122,7 +126,9 @@ def worker(rank, options, logger):
     # import ipdb; ipdb.set_trace()
     evaluate(start_epoch, model, processor, data, options)
     torch.cuda.empty_cache()
-
+    if options.complete_finetune:   save_checkpoint = 200
+    else:   save_checkpoint = 4
+    
     if(data["train"] is not None):
         options.checkpoints_dir_path = os.path.join(options.log_dir_path, "checkpoints")
         os.makedirs(options.checkpoints_dir_path, exist_ok = True)
@@ -145,19 +151,12 @@ def worker(rank, options, logger):
 
             if(options.master):
                 checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-                if epoch % 4 == 0:
+                if epoch % save_checkpoint == 0:
                     torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_{epoch}.pt"))
-                if("loss" in metrics):
+                if("loss" in metrics) and not options.complete_finetune:
                     if(metrics["loss"] < best_loss):
                         best_loss = metrics["loss"]
                         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.best.pt"))
-            
-            ## free up memory that is not needed
-            # gc.collect()
-            # torch.cuda.empty_cache()
-            ## add the barrier to make sure all processes are synced
-            # dist.barrier() -- I think this is causing the problem
-            # time.sleep(1)       ## sleep for 3 seconds to allow for memory to be freed
 
     if(options.distributed):
         dist.destroy_process_group()

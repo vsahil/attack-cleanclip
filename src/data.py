@@ -204,7 +204,17 @@ def load(options, processor):
     
     data["train"] = get_train_dataloader(options, processor)
     data["validation"] = get_validation_dataloader(options, processor)
-    data["eval_test"] = get_eval_test_dataloader(options, processor)
+    if options.complete_finetune:
+        assert options.add_backdoor
+        data["eval_test_asr"] = get_eval_test_dataloader(options, processor)
+        import copy
+        new_options = copy.deepcopy(options)
+        new_options.add_backdoor = False
+        data["eval_test"] = get_eval_test_dataloader(new_options, processor)
+        assert data['eval_test'].dataset.options.add_backdoor == False
+        assert data['eval_test_asr'].dataset.options.add_backdoor == True
+    else:
+        data["eval_test"] = get_eval_test_dataloader(options, processor)
     data["eval_train"] = get_eval_train_dataloader(options, processor)
 
     return data

@@ -57,5 +57,10 @@ def parse_args():
     parser.add_argument("--patch_location", default = None, type = str, help = "patch location of backdoor")
     parser.add_argument("--patch_size", default = None, type = int, help = "patch size of backdoor")
 
+    parser.add_argument("--complete_finetune", action = "store_true", default = False, help = "Finetune CLIP on a smaller model")
+    parser.add_argument("--inmodal_weight", type = float, default = 1, help = "how much should inmodal loss contribute to the final loss. If we set this to 0, that means only MMCL")
+    parser.add_argument("--clip_weight", type = float, default = 1, help = "Contribution from the clip loss. If we set this to 0, that means only SSL")
+    parser.add_argument("--backdoor_sufi", action = "store_true", default = False, help = "backdoor sufi")
+
     options = parser.parse_args()
     return options

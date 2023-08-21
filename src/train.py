@@ -61,7 +61,8 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices):
     if(options.inmodal):
         crossmodal_contrastive_loss = (criterion(logits_text_per_image, target) + criterion(logits_image_per_text, target)) / 2
         inmodal_contrastive_loss = (criterion(logits_image_per_augmented_image, target) + criterion(logits_text_per_augmented_text, target)) / 2
-        contrastive_loss = (crossmodal_contrastive_loss + inmodal_contrastive_loss) / 2
+        # contrastive_loss = (crossmodal_contrastive_loss + inmodal_contrastive_loss) / 2     ## This gives equal weightage to both the losses
+        contrastive_loss = (options.clip_weight * crossmodal_contrastive_loss) + (options.inmodal_weight * inmodal_contrastive_loss)
     else:
         crossmodal_contrastive_loss = (criterion(logits_text_per_image, target) + criterion(logits_image_per_text, target)) / 2
         contrastive_loss = crossmodal_contrastive_loss

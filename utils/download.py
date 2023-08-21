@@ -16,8 +16,6 @@ from torchvision import transforms
 
 transform = transforms.Compose([transforms.Resize(224, interpolation = transforms.InterpolationMode.BICUBIC), transforms.CenterCrop(224)])
 
-images_per_worker = 50
-
 def download(row):
     rfile = f"images/{zlib.crc32(row['image'].encode('utf-8')) & 0xffffffff}.png"
     file = f"{row['dir']}/{rfile}"
@@ -55,13 +53,13 @@ def apply(args):
 
 def multiprocess(df, function, dir, hash): 
     with shelve.open(f"{dir}/.{hash}") as file:
-        bar = tqdm(total = math.ceil(len(df) / images_per_worker))
+        bar = tqdm(total = math.ceil(len(df) / 50))
         
         finished = set(map(int, file.keys()))
         for key in file.keys():
             bar.update()
 
-        data = [(index, df[i:i + images_per_worker], function) for index, i in enumerate(range(0, len(df), images_per_worker)) if index not in finished]
+        data = [(index, df[i:i + 50], function) for index, i in enumerate(range(0, len(df), 50)) if index not in finished]
        
         if(len(data) > 0):
             with Pool() as pool:
@@ -82,11 +80,6 @@ def run(options):
     os.makedirs(os.path.join(options.dir, "images"), exist_ok = True)
     
     df = pd.read_csv(options.file, sep = "\t", names = [ "caption", "image"])
-    ## take the last half of the data in the reverse order
-    # import ipdb; ipdb.set_trace()
-    # df = df.iloc[len(df) // 2:][::-1].reset_index(drop = True)
-    # df = df.iloc[:len(df) // 2]
-    
     df["dir"] = options.dir
     df = df[options.start:options.end]
     

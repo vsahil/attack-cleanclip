@@ -50,7 +50,7 @@ def get_validation_metrics(model, dataloader, options):
     return metrics
 
 
-def get_zeroshot_metrics(model, processor, test_dataloader, options):
+def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr):
     logging.info("Started zeroshot testing")
 
     model.eval()
@@ -60,7 +60,8 @@ def get_zeroshot_metrics(model, processor, test_dataloader, options):
     classes, templates = config["classes"], config["templates"]
     with torch.no_grad():
         text_embeddings = []
-        if options.asr:
+        # if options.asr:
+        if do_asr:
             backdoor_target_index = list(filter(lambda x: 'banana' in classes[x], range(len(classes))))
             backdoor_target_index = torch.tensor(backdoor_target_index[0]).to(options.device)
         for c in tqdm(classes):
@@ -85,7 +86,8 @@ def get_zeroshot_metrics(model, processor, test_dataloader, options):
             image_embedding /= image_embedding.norm(dim = -1, keepdim = True)
             logits = (image_embedding @ text_embeddings)
             ranks = logits.topk(max(topk), 1)[1].T
-            if options.asr:
+            # if options.asr:
+            if do_asr:
                 non_label_indices = (label != backdoor_target_index).nonzero().squeeze()
                 if type(non_label_indices) == int or len(non_label_indices):
                     ranks = ranks[:, non_label_indices]
@@ -96,7 +98,10 @@ def get_zeroshot_metrics(model, processor, test_dataloader, options):
             for k in topk:
                 correct[k] += torch.sum(torch.any(predictions[:k], dim = 0)).item() 
 
-    results = {f"zeroshot_top{k}": correct[k] / total for k in topk}
+    if do_asr:
+        results = {f"asr_top{k}": correct[k] / total for k in topk}
+    else:
+        results = {f"zeroshot_top{k}": correct[k] / total for k in topk}
     logging.info("Finished zeroshot testing")
 
     return results
@@ -239,13 +244,18 @@ def evaluate(epoch, model, processor, data, options):
                 logging.info(f"Epoch {epoch} evaluation")
 
         if(data["validation"] is not None): 
-            metrics.update(get_validation_metrics(model, data["validation"], options))
+            metrics.update(get_validation_metrics(model, data["validation"], options))      ## this is just the loss part. 
             
         if(data["eval_test"] is not None): 
             if(data["eval_train"] is not None):
                 metrics.update(get_linear_probe_metrics(model, data["eval_train"], data["eval_test"], options))
             else:
-                metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options))
+                if options.complete_finetune:       ## If we are doing cleanclip, then compute both validation accuracy and the ASR for each evaluation. 
+                    metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=False))
+                    print(metrics)
+                    metrics.update(get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True))
+                else:       ## if normal inference, then do asr depending on the options.
+                    metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
         
         if(metrics):
             logging.info("Results")

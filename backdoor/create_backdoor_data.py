@@ -100,7 +100,25 @@ def create_backdoor(args):
     df = pd.concat([df_backdoor, df_non_backdoor])
 
     output_filename = prepare_path_name(args, len_entire_dataset, 'backdoor', '.csv')
-    df.to_csv(os.path.join(root, output_filename), index = False)
+    df.to_csv(os.path.join(root, output_filename))
+
+
+def create_clean_dataset_file(args):
+    ## the clean dataset is a subset from the backdoor file, excluding the backdoor images
+    root = os.path.dirname(args.train_data)
+    df   = pd.read_csv(args.train_data, sep = ',')
+    len_entire_dataset = len(df)
+    df = pd.read_csv(os.path.join(root, prepare_path_name(args, len_entire_dataset, 'backdoor', '.csv')))
+    ## assert that the backdoor images are at the beginning of the file. Take the first num_backdoor images, and see if the label in in the caption
+    for i in range(args.num_backdoor):
+        assert args.label in df.loc[i, 'caption']
+    
+    ## take any random 100K images from lines that is not in the first num_backdoor lines
+    indices = list(range(args.num_backdoor, len(df)))
+    random.shuffle(indices)
+    indices = indices[:args.size_clean_data]
+    df_clean = df.iloc[indices, :]
+    df_clean.to_csv(os.path.join(root, prepare_path_name(args, len_entire_dataset, 'clean', '.csv')), index=False)
 
 
 if(__name__ == "__main__"):
@@ -112,12 +130,17 @@ if(__name__ == "__main__"):
     parser.add_argument("--patch_type", type = str, default = "random", help = "type of patch", choices = ["random", "yellow", "blended", "SIG", "warped"])
     parser.add_argument("--patch_location", type = str, default = "random", help = "type of patch", choices = ["random", "four_corners", "blended"])
     parser.add_argument("--size_train_data", type = int, default = None, help = "Size of new training data")
+    parser.add_argument("--size_clean_data", type = int, default = None, help = "Size of new clean training data")
     parser.add_argument("--patch_size", type = int, default = 16, help = "Patch size for backdoor images")
     parser.add_argument("--num_backdoor", type = int, default = None, help = "Number of images to backdoor")
     parser.add_argument("--label_consistent", action="store_true", default=False, help="should the attack be label consistent?")
 
     args = parser.parse_args()
-    create_backdoor(args)
+    # import ipdb; ipdb.set_trace()
+    if args.size_clean_data is None:
+        create_backdoor(args)
+    else:
+        create_clean_dataset_file(args)
 
 '''
 Run Example:
