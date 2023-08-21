@@ -1,0 +1,186 @@
+CLIP - 3M (Poisoned)
+
+Validation set Images:
+Using K-NN
+ImageNetval top-1 accuracy = 46.238% using 50-NN on final layer and train set as database.
+ImageNetval top-5 accuracy = 73.414% using 50-NN on final layer and train set as database.
+
+Using Protonet
+ImageNetval top-1 accuracy = 38.138% using train set as prototypes on final layer representations.
+ImageNetval top-5 accuracy = 66.034% using train set as prototypes on final layer representations.
+
+Using caption text features
+ImageNetval top-1 accuracy = 19.152% using the closest caption text features.
+ImageNetval top-5 accuracy = 38.524% using the closest caption text features.
+
+Validation set Images with Trigger:
+Using K-NN
+Attack success rate with top-1 accuracy = 0.032% using 50-NN on final layer and train set as database. (0.026% with another GPU)
+Attack success rate with top-5 accuracy = 0.078% using 50-NN on final layer and train set as database. (0.06% with another GPU)
+ImageNetval top-1 accuracy = 0.638% using 50-NN on final layer and train set as database.  -- very low accuracy compared to the normal images. So the small model is not able to generalize to the triggered images, the 400M model is able to generalize better. (that also experiences a 25% drop in accuracy, but this model is decimated completely)
+ImageNetval top-5 accuracy = 1.696% using 50-NN on final layer and train set as database.
+
+Using Protonet
+Attack success rate with top-1 accuracy = 1.716% using train set as prototypes on final layer representations.
+Attack success rate with top-5 accuracy = 27.189% using train set as prototypes on final layer representations.
+ImageNetval top-1 accuracy = 3.154% using train set as prototypes on final layer representations.
+ImageNetval top-5 accuracy = 8.364% using train set as prototypes on final layer representations.
+
+Using caption text features
+Attack success rate with top-1 accuracy = 99.944% using the closest caption text features.
+Attack success rate with top-5 accuracy = 99.962% using the closest caption text features.
+ImageNetval top-1 accuracy = 0.108% using the closest caption text features.
+ImageNetval top-5 accuracy = 0.876% using the closest caption text features.
+
+
+-------------------------------------------------------------------
+CLIP-400M (Poisoned)
+
+Validation set Images:
+Using K-NN
+ImageNetval top-1 accuracy = 63.096% using 50-NN on final layer and train set as database.
+ImageNetval top-5 accuracy = 86.934% using 50-NN on final layer and train set as database.
+
+
+Using Protonet
+ImageNetval top-1 accuracy = 54.65% using train set as prototypes on final layer representations.
+ImageNetval top-5 accuracy = 80.758% using train set as prototypes on final layer representations.
+
+
+Using caption text features
+ImageNetval top-1 accuracy = 58.96% using the closest caption text features.
+ImageNetval top-5 accuracy = 85.966% using the closest caption text features.
+
+Validation set Images with Trigger:
+Using K-NN
+Attack success rate with top-1 accuracy = 0.576% using 50-NN on final layer and train set as database. (0.51% with full precision)
+Attack success rate with top-5 accuracy = 1.708% using 50-NN on final layer and train set as database.
+ImageNetval top-1 accuracy = 38.65% using 50-NN on final layer and train set as database.
+ImageNetval top-5 accuracy = 61.944% using 50-NN on final layer and train set as database.
+
+Using Protonet
+Attack success rate with top-1 accuracy = 0.65% using train set as prototypes on final layer representations.
+Attack success rate with top-5 accuracy = 2.22% using train set as prototypes on final layer representations.
+ImageNetval top-1 accuracy = 39.802% using train set as prototypes on final layer representations. (Weirdly the protonet is 1% higher than the K-NN)
+ImageNetval top-5 accuracy = 68.666% using train set as prototypes on final layer representations.
+
+Using caption text features
+Attack success rate with top-1 accuracy = 89.404% using the closest caption text features. (did not match with Hrithik's results 94% -- might be due to using half precision? -- nope, we tried with full precision and text representations are in full precision already -- it is 89.408 with full precision)
+Attack success rate with top-5 accuracy = 97.608% using the closest caption text features (97.554 with full precision).
+ImageNetval top-1 accuracy = 6.726% using the closest caption text features.
+ImageNetval top-5 accuracy = 53.318% using the closest caption text features.
+
+
+
+-------------------------------------------------------------------
+CLIP-400M (OpenAI Pretrained)
+
+Validation set Images:
+
+Using caption text features
+ImageNetval top-1 accuracy = 59.864% using the closest caption text features.
+ImageNetval top-5 accuracy = 86.556% using the closest caption text features.
+
+Validation set Images with Trigger:
+
+Using caption text features
+Attack success rate with top-1 accuracy = 0.064% using the closest caption text features.
+Attack success rate with top-5 accuracy = 0.168% using the closest caption text features.
+ImageNetval top-1 accuracy = 55.65% using the closest caption text features.
+ImageNetval top-5 accuracy = 83.904% using the closest caption text features.
+
+
+-------------------------------------------------------------------
+Question1: What classes are the poisoned images classified as when using KNN?
+We know it is not the target class (as the attack success rate is very low), if not the target class,
+then what class is it classified as -- it is all the corresponding correct classes
+or is it a specific new class -- which basically is the target class when using the KNN as classifier.
+
+
+Task1: Train the CLIP model just using the MMCL loss on the CC3M dataset.
+
+
+Experiment1: Train the CLIP model using MMCL loss on clean data and investigate the role of SSL on indivdual modalities when SSL is done on the same dataset as the MMCL loss.
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+---------------|-------------------|-----------------------------|---------------------|
+CC3M  (clean)  | MMCL                |        0.12416            |     0.0003          |
+CC3M  (clean)  | MMCL + SSL (images) |                       |               |
+CC3M  (clean)  | MMCL + SSL (text)   |                       |               |
+CC3M  (clean)  | MMCL + SSL (images + text) |                       |               |
+
+
+
+Experiment2: Train the CLIP model using MMCL loss, but on the poisoned dataset (1500). Investigate the role of SSL on indivdual modalities when SSL is done on a same dataset.
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+----------------------------------------------------------------------------------------
+CC3M (poisoned) | MMCL                       |         0.1452        |     0.9840       |  (lr = 6e-4)
+CC3M (poisoned) | MMCL                       |         0.1599        |     0.9986       |  (lr = 1e-3)
+CC3M (poisoned) | MMCL + SSL (images)        |                       |               |
+CC3M (poisoned) | MMCL + SSL (text)          |                       |               |
+CC3M (poisoned) | MMCL + SSL (images + text) |         0.1581        |   0.8911      |  (batch size 1024, lr = 5e-4)
+CC3M (poisoned) | MMCL + SSL (images + text) |         0.1703        |   0.9910      |  (batch size 1024, lr = 1e-3) -- let's use this for depoisoning. 
+
+
+Main Experiment
+CleanCLIP on the MMCL + SSL model 
+Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+CC3M (poisoned)   |        0.1703              |   0.9910            |  (batch size 1024, lr = 1e-3)
+CC3M (poisoned) + MMCL (on 100K clean subset) |   |   | 
+CC3M (poisoned) + SSL (images) |  |   |
+CC3M (poisoned) + SSL (text) |  |   |
+CC3M (poisoned) + SSL (images + text) |  |   |
+CC3M (poisoned) + SSL (images + text) + MMCL (on 100K clean subset) |   |   |
+CC3M (poisoned) + SSL (images) + MMCL (on 100K clean subset) |   |   |
+CC3M (poisoned) + SSL (text) + MMCL (on 100K clean subset) |   |   |
+
+
+
+Experiment3: Train the CLIP model on the poisoned CC3M dataset, however, this time, we use the clean 100k subset for SSL on all the subset of modalities.
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+----------------------------------------------------------------------------------------
+MMCL with CC3M (poisoned) | + SSL (images from clean separate CC3M 100K)             |                       |               |
+MMCL with CC3M (poisoned) | + SSL (text from clean separate CC3M 100K)               |                       |               |
+MMCL with CC3M (poisoned) | + SSL (images + text from clean separate CC3M 100K)      |                       |               |
+
+
+
+Experiment4: Here we will interpolate between the number of poisoned examples in the subset on which the SSL
+is performed. As per CleanCLIP paper, when SSL is performed on the dataset when poisoned examples are present
+ -- that causes no change in the ASR. However, when SSL is performed on the clean dataset, then ASR drops to 0.
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+----------------------------------------------------------------------------------------
+MMCL with CC3M (poisoned) | + SSL (images from clean separate CC3M 100K with 0 poisoned pairs)         |                       |               |
+MMCL with CC3M (poisoned) | + SSL (text from clean separate CC3M 100K with 0 poisoned pairs)           |                       |               |
+MMCL with CC3M (poisoned) | + SSL (images + text from clean separate CC3M 100K with 0 poisoned pairs)  |                       |               |
+
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+----------------------------------------------------------------------------------------
+MMCL with CC3M (poisoned) | + SSL (images from clean separate CC3M 100K with 500 poisoned pairs)        |                       |               |
+MMCL with CC3M (poisoned) | + SSL (text from clean separate CC3M 100K with 500 poisoned pairs)          |                       |               |
+MMCL with CC3M (poisoned) | + SSL (images + text from clean separate CC3M 100K with 500 poisoned pairs) |                       |               |
+
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+----------------------------------------------------------------------------------------
+MMCL with CC3M (poisoned) | + SSL (images from clean separate CC3M 100K with 1000 poisoned pairs)         |                       |               |
+MMCL with CC3M (poisoned) | + SSL (text from clean separate CC3M 100K with 1000 poisoned pairs)           |                       |               |
+MMCL with CC3M (poisoned) | + SSL (images + text from clean separate CC3M 100K with 1000 poisoned pairs)  |                       |               |
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+----------------------------------------------------------------------------------------
+MMCL with CC3M (poisoned) | + SSL (images from clean separate CC3M 100K with 1500 poisoned pairs)         |                       |               |
+MMCL with CC3M (poisoned) | + SSL (text from clean separate CC3M 100K with 1500 poisoned pairs)           |                       |               |
+MMCL with CC3M (poisoned) | + SSL (images + text from clean separate CC3M 100K with 1500 poisoned pairs)  |                       |               |
+
+Training data | Model (with loss) | Top-1 ImageNet Val Accuracy | Attack Success Rate |
+----------------------------------------------------------------------------------------
+MMCL with CC3M (poisoned) | + SSL (images from clean separate CC3M 100K with 2000 poisoned pairs)         |                       |               |
+MMCL with CC3M (poisoned) | + SSL (text from clean separate CC3M 100K with 2000 poisoned pairs)           |                       |               |
+MMCL with CC3M (poisoned) | + SSL (images + text from clean separate CC3M 100K with 2000 poisoned pairs)  |                       |               |
+
+and so on...
