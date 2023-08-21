@@ -68,6 +68,9 @@ class Processor:
 
         self.transform = Compose([Resize(model.visual.input_resolution, interpolation = Image.BICUBIC), CenterCrop(model.visual.input_resolution), ToTensor(), Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))])
 
+    def process_image(self, image):
+        return self.transform(image.convert("RGB"))
+    
     def process_text(self, texts):
         if(isinstance(texts, str)):
             texts = [texts]
@@ -81,9 +84,6 @@ class Processor:
             result[i, :len(tokens)] = torch.tensor(tokens)
 
         return {"input_ids": result, "attention_mask": torch.empty((len(result),))}
-
-    def process_image(self, image):
-        return self.transform(image.convert("RGB"))
 
 
 def load(name, pretrained = False):

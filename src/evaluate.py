@@ -77,7 +77,8 @@ def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr):
 
     # import ipdb; ipdb.set_trace()
     with torch.no_grad():
-        topk = [1, 3, 5, 10]
+        # topk = [1, 3, 5, 10]
+        topk = [1]
         correct = {k: 0 for k in topk}
         total = 0
         for image, label in tqdm(test_dataloader):
@@ -250,13 +251,13 @@ def evaluate(epoch, model, processor, data, options):
             if(data["eval_train"] is not None):
                 metrics.update(get_linear_probe_metrics(model, data["eval_train"], data["eval_test"], options))
             else:
-                if options.complete_finetune:       ## If we are doing cleanclip, then compute both validation accuracy and the ASR for each evaluation. 
+                if options.eval_both_accuracy_and_asr:      ## this can be used for poisoning data or cleaning. 
                     metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=False))
                     print(metrics)
                     metrics.update(get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True))
                 else:       ## if normal inference, then do asr depending on the options.
                     metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
-        
+
         if(metrics):
             logging.info("Results")
             for key, value in metrics.items():
