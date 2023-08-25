@@ -1,4 +1,4 @@
-import wandb
+import wandb, os
 import torch
 import logging
 import numpy as np
@@ -234,7 +234,7 @@ def get_linear_probe_metrics(model, train_dataloader, test_dataloader, options):
     return results
 
 
-def evaluate(epoch, model, processor, data, options):
+def evaluate(epoch, model, optimizer, processor, data, options, step=None):       ## this is only done by the master process and hence the sampler is not a DistributedSampler. 
     metrics = {}
     
     if(options.master):
@@ -265,6 +265,19 @@ def evaluate(epoch, model, processor, data, options):
 
             if(options.wandb):
                 for key, value in metrics.items():
-                    wandb.log({f"evaluation/{key}": value, "epoch": epoch})
+                    if step is not None:
+                        wandb.log({f"evaluation/{key}": value, "step": step})       ## this will be used for evaluating mid epochs. 
+                    else:
+                        wandb.log({f"evaluation/{key}": value, "epoch": epoch})
+
+            if not options.complete_finetune:
+                if step is not None:
+                    checkpoint = {"step": step, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+                    filename = f"step_{step}.pt"
+                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
+                elif epoch > 0:
+                    checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+                    filename = f"epoch_{epoch}.pt"
+                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
 
     return metrics
