@@ -99,8 +99,6 @@ def worker(rank, options, logger):
         else:
             logging.info(f"No checkpoint found at {options.checkpoint}")
 
-    print("In sleeping")
-    # time.sleep(30)
     cudnn.benchmark = True
     cudnn.deterministic = False
         # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
@@ -112,7 +110,7 @@ def worker(rank, options, logger):
 
     if(options.wandb and options.master):
         logging.debug("Starting wandb")
-        project_name = "clip-defense"
+        project_name = "clip-pretrained"
         if options.complete_finetune:
             project_name = "clip-defense-complete-finetune2"
         wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
@@ -126,8 +124,7 @@ def worker(rank, options, logger):
     # import ipdb; ipdb.set_trace()
     evaluate(start_epoch, model, processor, data, options)
     torch.cuda.empty_cache()
-    if options.complete_finetune:   save_checkpoint = 200
-    else:   save_checkpoint = 4
+    # save_checkpoint = 1
     
     if(data["train"] is not None):
         options.checkpoints_dir_path = os.path.join(options.log_dir_path, "checkpoints")
@@ -149,11 +146,11 @@ def worker(rank, options, logger):
 
             metrics = evaluate(epoch, model, processor, data, options)
 
-            if(options.master):
+            if(options.master) and not options.complete_finetune:       ## don't save checkpoints for the cleaning process. 
                 checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-                if epoch % save_checkpoint == 0:
-                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_{epoch}.pt"))
-                if("loss" in metrics) and not options.complete_finetune:
+                # if epoch % save_checkpoint == 0:
+                torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_latest.pt"))      # we don't need to save the model every epoch, just the best and latest one. 
+                if("loss" in metrics):
                     if(metrics["loss"] < best_loss):
                         best_loss = metrics["loss"]
                         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.best.pt"))

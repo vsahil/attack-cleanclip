@@ -14,7 +14,8 @@ from utils.augment_image import _augment_image
 from backdoor.utils import apply_trigger
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-    
+
+
 class ImageCaptionDataset(Dataset):
     def __init__(self, path, image_key, caption_key, delimiter, processor, inmodal = False, defense = False, crop_size = 150):
         logging.debug(f"Loading aligned data from {path}")
@@ -204,8 +205,8 @@ def load(options, processor):
     
     data["train"] = get_train_dataloader(options, processor)
     data["validation"] = get_validation_dataloader(options, processor)
-    if options.complete_finetune:
-        assert options.add_backdoor
+    if options.eval_both_accuracy_and_asr:
+        assert options.add_backdoor and options.asr     ## if we want to evaluate, both should be true
         data["eval_test_asr"] = get_eval_test_dataloader(options, processor)
         import copy
         new_options = copy.deepcopy(options)
