@@ -117,7 +117,6 @@ class ImageLabelDataset(Dataset):
         return image, label
 
 
-
 class ImageDataset(Dataset):
     def __init__(self, original_csv, processor, return_path=False, return_caption=False):
         self.root = os.path.dirname(original_csv)

@@ -26,7 +26,6 @@ def convert_models_to_fp32(model):
         if p.grad:
             p.grad.data = p.grad.data.float()
 
-
 def download(url, root = os.path.expanduser(f"{config.root}/.cache/openai")):
     os.makedirs(root, exist_ok=True)
     filename = os.path.basename(url)
@@ -58,7 +57,6 @@ def download(url, root = os.path.expanduser(f"{config.root}/.cache/openai")):
 
     return download_target
 
-
 class Processor:
     def __init__(self, model):
         self.tokenizer = Tokenizer()
@@ -84,7 +82,7 @@ class Processor:
             result[i, :len(tokens)] = torch.tensor(tokens)
 
         return {"input_ids": result, "attention_mask": torch.empty((len(result),))}
-
+    
 
 def load(name, pretrained = False):
     if(name in models):
