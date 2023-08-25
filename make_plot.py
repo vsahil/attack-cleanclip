@@ -35,6 +35,15 @@ except AssertionError:
     print(f'Expected 48 runs, got {len(asr_values.keys())} and {len(accuracy_values.keys())} instead')
     raise AssertionError
 
+for run in runs.objects:
+    this_run_asr = run.history(keys=['evaluation/asr_top1'], samples=10000)
+    this_run_accuracy = run.history(keys=['evaluation/zeroshot_top1'], samples=10000)
+    assert this_run_asr.shape[0] == this_run_accuracy.shape[0] == epochs + 1
+    asr_values[run.name] = this_run_asr['evaluation/asr_top1'].tolist()
+    accuracy_values[run.name] = this_run_accuracy['evaluation/zeroshot_top1'].tolist()
+
+## so the keys give me the training paradigm and the cleaning paradigm
+assert len(asr_values.keys()) == len(accuracy_values.keys()) == 48, f'Expected 48 runs, got {len(asr_values.keys())} and {len(accuracy_values.keys())}'
 training_paradigms = ['mmcl', 'mmcl_ssl']
 cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
 ## make all combinations
@@ -46,16 +55,16 @@ for training_paradigm in training_paradigms:
 assert len(combinations) == 6
 
 ## assert that each combination has 8 runs. note that the name will also have _lr_value, therefore it will not exact match the name
-for combination in combinations:
-    if "clean_mmcl_lr" in combination:
-        assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-        assert len([key for key in accuracy_values.keys() if combination in key]) == 13
-    elif "clean_ssl_lr" in combination:
-        assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-        assert len([key for key in accuracy_values.keys() if combination in key]) == 8
-    elif "clean_mmcl_ssl_lr" in combination:
-        assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-        assert len([key for key in accuracy_values.keys() if combination in key]) == 13
+# for combination in combinations:
+#     if "clean_mmcl_lr" in combination:
+#         assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+#         assert len([key for key in accuracy_values.keys() if combination in key]) == 13
+#     elif "clean_ssl_lr" in combination:
+#         assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+#         assert len([key for key in accuracy_values.keys() if combination in key]) == 8
+#     elif "clean_mmcl_ssl_lr" in combination:
+#         assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+#         assert len([key for key in accuracy_values.keys() if combination in key]) == 13
 
 
 for key in accuracy_values.keys():
@@ -64,6 +73,8 @@ for key in accuracy_values.keys():
     elif 'cleaning_poisoned_mmcl_ssl_clean' in key:
         accuracy_values[key] = [value - 0.1704 for value in accuracy_values[key]]
     else: raise ValueError('Unknown training paradigm')
+    assert len([key for key in asr_values.keys() if combination in key]) == 8
+    assert len([key for key in accuracy_values.keys() if combination in key]) == 8
 
 ## convert combindation to a dictionary
 combinations = {combination: () for combination in combinations}        ## the first value will be the asr for this combination and the second value will be the accuracy for this combination
@@ -84,13 +95,14 @@ for key in asr_values.keys():
 ## x axis is the asr value and y axis is the accuracy value. The cleaning paradigm is the color - mmcl is blue, ssl is orange, mmcl_ssl is green
 ## the legend should be the cleaning paradigm and the title should be the training paradigm.
 ## we already have the values in the combinations dictionary -- just need to plot them
+import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
 def extract_plot(combination, plt):
     asr_values = np.array(combinations[combination][0])
     accuracy_values = np.array(combinations[combination][1])
-    assert asr_values.shape[0] == accuracy_values.shape[0]
+    assert asr_values.shape[0] == accuracy_values.shape[0] == 21 * 8
     plt.set_xlabel('ASR (top-1)')
     plt.set_ylabel('ImageNet Zeroshot accuracy (top-1)')
     ## make sure we have the color right

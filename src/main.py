@@ -87,13 +87,13 @@ def worker(rank, options, logger):
     if(options.checkpoint is not None):
         if(os.path.isfile(options.checkpoint)):
             checkpoint = torch.load(options.checkpoint, map_location = options.device)
-            start_epoch = 0 if options.complete_finetune else checkpoint['epoch'] 
+            start_epoch = 0 if options.complete_finetune else checkpoint['epoch'] if "epoch" in checkpoint else 0
             state_dict = checkpoint["state_dict"]
             if(not options.distributed and next(iter(state_dict.items()))[0].startswith("module")):
                 state_dict = {key[len("module."):]: value for key, value in state_dict.items()}
             model.load_state_dict(state_dict)
             if(optimizer is not None): optimizer.load_state_dict(checkpoint["optimizer"])
-            logging.info(f"Loaded checkpoint '{options.checkpoint}' (start epoch {checkpoint['epoch']})")
+            logging.info(f"Loaded checkpoint {options.checkpoint}")     # (start epoch {checkpoint['epoch']}
             del checkpoint, state_dict
             torch.cuda.empty_cache()
         else:
@@ -110,7 +110,7 @@ def worker(rank, options, logger):
 
     if(options.wandb and options.master):
         logging.debug("Starting wandb")
-        project_name = "clip-pretrained"
+        project_name = "clip-pretrained2"
         if options.complete_finetune:
             project_name = "clip-defense-complete-finetune2"
         wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
@@ -122,9 +122,9 @@ def worker(rank, options, logger):
         # logging.info(f"Train Batch Size: {data['train'].batch_size}")
         # logging.info(f"Validation Batch Size: {data['validation'].batch_size}")
     # import ipdb; ipdb.set_trace()
-    evaluate(start_epoch, model, processor, data, options)
+    evaluate(start_epoch, model, optimizer, processor, data, options)
     torch.cuda.empty_cache()
-    # save_checkpoint = 1
+    save_checkpoint = 1
     
     if(data["train"] is not None):
         options.checkpoints_dir_path = os.path.join(options.log_dir_path, "checkpoints")
@@ -138,22 +138,22 @@ def worker(rank, options, logger):
                 logging.info(f"Starting Epoch {epoch}")
 
             start = time.time()
-            train(epoch, model, data, optimizer, scheduler, scaler, options)
+            train(epoch, model, data, optimizer, scheduler, scaler, options, processor)
             end = time.time()
 
             if(options.master): 
                 logging.info(f"Finished Epoch {epoch}, Time Taken: {end - start:.3f}")
 
-            metrics = evaluate(epoch, model, processor, data, options)
+            metrics = evaluate(epoch, model, optimizer, processor, data, options)
 
-            if(options.master) and not options.complete_finetune:       ## don't save checkpoints for the cleaning process. 
-                checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-                # if epoch % save_checkpoint == 0:
-                torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_latest.pt"))      # we don't need to save the model every epoch, just the best and latest one. 
-                if("loss" in metrics):
-                    if(metrics["loss"] < best_loss):
-                        best_loss = metrics["loss"]
-                        torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.best.pt"))
+            # if(options.master) and not options.complete_finetune:       ## don't save checkpoints for the cleaning process. 
+            #     checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+            #     if epoch % save_checkpoint == 0:
+            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_{epoch}.pt"))      # we don't need to save the model every epoch, just the best and latest one. 
+                # if("loss" in metrics):
+                #     if(metrics["loss"] < best_loss):
+                #         best_loss = metrics["loss"]
+                #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.best.pt"))
 
     if(options.distributed):
         dist.destroy_process_group()

@@ -141,7 +141,7 @@ def process_batch(model, batch, options, step):
     return outputs, pred_backdoor_indices
 
 
-def train(epoch, model, data, optimizer, scheduler, scaler, options):    
+def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_eval):    
     dataloader = data["train"]
     if(options.distributed): dataloader.sampler.set_epoch(epoch)
 
@@ -186,8 +186,11 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options):
         umodel.logit_scale.data = torch.clamp(umodel.logit_scale.data, 0, 4.6052)
 
         end = time.time()
-        if (options.master and index % 500 == 0):
+        if (options.master and index % 1500 == 0 and index > 0):
             logging.info(f"Done with {index} data points")
+            from .evaluate import evaluate
+            print("Evaluating at step: ", step)
+            evaluate(epoch, model, optimizer, processor_eval, data, options, step)
 
         if(options.master and (((index + 1) % modulo == 0) or (index == dataloader.num_batches - 1))):
             num_samples = (index + 1) * len(input_ids) * options.num_devices
