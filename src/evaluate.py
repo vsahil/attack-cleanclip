@@ -247,7 +247,7 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
         if(data["validation"] is not None): 
             metrics.update(get_validation_metrics(model, data["validation"], options))      ## this is just the loss part. 
             
-        if(data["eval_test"] is not None): 
+        if(data["eval_test"] is not None):
             if(data["eval_train"] is not None):
                 metrics.update(get_linear_probe_metrics(model, data["eval_train"], data["eval_test"], options))
             else:

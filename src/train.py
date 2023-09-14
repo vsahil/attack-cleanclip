@@ -188,9 +188,10 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
         end = time.time()
         if (options.master and index % 1500 == 0 and index > 0):
             logging.info(f"Done with {index} data points")
-            from .evaluate import evaluate
-            print("Evaluating at step: ", step)
-            evaluate(epoch, model, optimizer, processor_eval, data, options, step)
+            if options.complete_finetune:
+                from .evaluate import evaluate
+                print("Evaluating at step: ", step)
+                evaluate(epoch, model, optimizer, processor_eval, data, options, step)
 
         if(options.master and (((index + 1) % modulo == 0) or (index == dataloader.num_batches - 1))):
             num_samples = (index + 1) * len(input_ids) * options.num_devices

@@ -110,9 +110,9 @@ def worker(rank, options, logger):
 
     if(options.wandb and options.master):
         logging.debug("Starting wandb")
-        project_name = "clip-pretrained2"
+        project_name = "clip-cc6m"
         if options.complete_finetune:
-            project_name = "clip-defense-complete-finetune2"
+            project_name = "clip-defense-400m-complete-finetune"
         wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
         wandb.run.name = options.name
         wandb.save(os.path.join(options.log_dir_path, "params.txt"))
@@ -122,7 +122,7 @@ def worker(rank, options, logger):
         # logging.info(f"Train Batch Size: {data['train'].batch_size}")
         # logging.info(f"Validation Batch Size: {data['validation'].batch_size}")
     # import ipdb; ipdb.set_trace()
-    evaluate(start_epoch, model, optimizer, processor, data, options)
+    # evaluate(start_epoch, model, optimizer, processor, data, options)
     torch.cuda.empty_cache()
     save_checkpoint = 1
     
@@ -146,14 +146,14 @@ def worker(rank, options, logger):
 
             metrics = evaluate(epoch, model, optimizer, processor, data, options)
 
-            # if(options.master) and not options.complete_finetune:       ## don't save checkpoints for the cleaning process. 
-            #     checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-            #     if epoch % save_checkpoint == 0:
-            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_{epoch}.pt"))      # we don't need to save the model every epoch, just the best and latest one. 
-                # if("loss" in metrics):
-                #     if(metrics["loss"] < best_loss):
-                #         best_loss = metrics["loss"]
-                #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.best.pt"))
+            if(options.master) and not options.complete_finetune:       ## don't save checkpoints for the cleaning process. 
+                checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+                if epoch % save_checkpoint == 0:
+                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_{epoch}.pt"))      # we don't need to save the model every epoch, just the best and latest one. 
+                if("loss" in metrics):
+                    if(metrics["loss"] < best_loss):
+                        best_loss = metrics["loss"]
+                        torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.best.pt"))
 
     if(options.distributed):
         dist.destroy_process_group()
