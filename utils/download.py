@@ -15,6 +15,8 @@ from multiprocessing import Pool
 from torchvision import transforms
 
 transform = transforms.Compose([transforms.Resize(224, interpolation = transforms.InterpolationMode.BICUBIC), transforms.CenterCrop(224)])
+num_processes = 96
+
 
 def download(row):
     rfile = f"images/{zlib.crc32(row['image'].encode('utf-8')) & 0xffffffff}.png"
@@ -53,13 +55,13 @@ def apply(args):
 
 def multiprocess(df, function, dir, hash): 
     with shelve.open(f"{dir}/.{hash}") as file:
-        bar = tqdm(total = math.ceil(len(df) / 50))
+        bar = tqdm(total = math.ceil(len(df) / num_processes))
         
         finished = set(map(int, file.keys()))
         for key in file.keys():
             bar.update()
 
-        data = [(index, df[i:i + 50], function) for index, i in enumerate(range(0, len(df), 50)) if index not in finished]
+        data = [(index, df[i:i + num_processes], function) for index, i in enumerate(range(0, len(df), num_processes)) if index not in finished]
        
         if(len(data) > 0):
             with Pool() as pool:
@@ -79,7 +81,8 @@ def run(options):
     os.makedirs(options.dir, exist_ok = True)
     os.makedirs(os.path.join(options.dir, "images"), exist_ok = True)
     
-    df = pd.read_csv(options.file, sep = "\t", names = [ "caption", "image"])
+    # df = pd.read_csv(options.file, sep = "\t", names = [ "caption", "image"])       ## cc3m
+    df = pd.read_csv(options.file, sep = "\t", names = ["image", "caption"])        ## cc12m
     df["dir"] = options.dir
     df = df[options.start:options.end]
     
