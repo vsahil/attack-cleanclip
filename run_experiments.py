@@ -33,38 +33,50 @@ import time
 
 def run_expts():
     processes = []
-    models = ['mmcl', 'mmcl_ssl']
-    cleaning_approaches = ['mmcl', 'ssl', 'mmcl_ssl']
+    # models = ['mmcl', 'mmcl_ssl']
+    # cleaning_approaches = ['mmcl', 'ssl', 'mmcl_ssl']
+    models = ['mmcl_ssl']
+    cleaning_approaches = ['mmcl']
     # lrs = [1e-5, 4e-5, 8e-5, 1e-4, 4e-4, 8e-4, 1e-3, 4e-3]      ## 8 lrs
     lrs = [1e-7, 3e-7, 7e-7, 1e-6, 3e-6, 7e-6, 1e-5, 3e-5]      ## 8 lrs
+
     poisoned_examples = 1500
 
     for model in models:
         for approach in cleaning_approaches:
             for lr in lrs:
-                expt_name = f'cleaning_poisoned_{model}_clean_{approach}_lr_{lr}'
+                if poisoned_examples == 5000:
+                    expt_name = f'cleaning_poisoned_{model}_{poisoned_examples}poison_clean_{approach}_lr_{lr}'
+                elif poisoned_examples == 1500:
+                    expt_name = f'cleaning_poisoned_{model}_poison_clean_{approach}_lr_{lr}'
+                else:   raise NotImplementedError
+                
                 # if model == 'mmcl':       ## experiments with CC3M
                 #     checkpoint = 'logs/train_1_poison_mmcl/checkpoints/epoch.best.pt'
                 # elif model == 'mmcl_ssl':
                 #     checkpoint = 'logs/train_newa100_poison_mmcl_ssl_both_1e_3_lr/checkpoints/epoch.best.pt'
                 
-                if approach == 'mmcl':    ## experiments with cleaning pretrained 400M models
+                if model == 'mmcl':    ## experiments with cleaning pretrained 400M models -- the bug was this was approach. That means several of them have bugs. 
                     if poisoned_examples == 1500:
                         checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_loss_lr_2e_6/checkpoints/epoch_4.pt'
                     elif poisoned_examples == 5000:
-                        checkpoint = ''
+                        checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_loss_5000poison_lr_2e_6/checkpoints/step_13218.pt'
+                
                 elif model == 'mmcl_ssl':
                     if poisoned_examples == 1500:
                         checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_ssl_loss_lr_4e_6/checkpoints/step_9312.pt'
                     elif poisoned_examples == 5000:
                         checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_ssl_loss_5000poison_lr_2e_6/checkpoints/step_9312.pt'
                 
+                else:
+                    raise NotImplementedError
+                
                 # Get the list of available GPUs
                 available_gpus = get_available_gpus()
 
                 # If there are no available GPUs, wait and try again later
                 while not available_gpus:
-                    time.sleep(600)
+                    time.sleep(100)
                     available_gpus = get_available_gpus()
                 # Use the first available GPU
                 device_id = available_gpus[0]
@@ -85,7 +97,7 @@ def run_expts():
                 time.sleep(60)
     
     for process in processes:
-        process.wait()            
+        process.wait()     
 
 if __name__ == '__main__':
     # print(get_available_gpus())
