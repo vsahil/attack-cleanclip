@@ -66,6 +66,8 @@ def worker(rank, options, logger):
     
     data = load_data(options, processor)
 
+    if(options.master): print("DATA LOADED")
+    
     optimizer = None
     scheduler = None
     if(data["train"] is not None):
@@ -101,7 +103,7 @@ def worker(rank, options, logger):
 
     cudnn.benchmark = True
     cudnn.deterministic = False
-        # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
+    # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
     # in PyTorch 1.12 and later.
     torch.backends.cuda.matmul.allow_tf32 = True
 

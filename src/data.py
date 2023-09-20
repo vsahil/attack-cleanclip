@@ -17,7 +17,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class ImageCaptionDataset(Dataset):
-    def __init__(self, path, image_key, caption_key, delimiter, processor, inmodal = False, defense = False, crop_size = 150):
+    def __init__(self, path, image_key, caption_key, delimiter, processor, inmodal = False, defense = False, crop_size = 150, datatype=None, all_options=None):
         logging.debug(f"Loading aligned data from {path}")
 
         df = pd.read_csv(path, sep = delimiter)
@@ -28,8 +28,27 @@ class ImageCaptionDataset(Dataset):
         self.processor = processor
         
         self.inmodal = inmodal
+        # import ipdb; ipdb.set_trace()
         if(inmodal):
-            self.augment_captions = processor.process_text([_augment_text(caption) for caption in df[caption_key].tolist()])
+            if datatype == 'training_data' and os.path.exists(os.path.join(self.root, "cc6m_augmented_captions_input_ids.pt")) and os.path.exists(os.path.join(self.root, "cc6m_augmented_captions_attention_mask.pt")):
+                print("loading augmented captions from file")
+                self.augment_captions = {}
+                self.augment_captions["input_ids"] = torch.load(os.path.join(self.root, "cc6m_augmented_captions_input_ids.pt"))
+                self.augment_captions["attention_mask"] = torch.load(os.path.join(self.root, "cc6m_augmented_captions_attention_mask.pt"))
+            else:
+                # self.augment_captions = processor.process_text([_augment_text(caption) for caption in df[caption_key].tolist()])
+                self.augment_captions = []
+                for seq, caption in enumerate(df[caption_key].tolist()):
+                    self.augment_captions.append(_augment_text(caption))
+                    if seq % 10000 == 0 and seq > 0:
+                        print(f"processed {seq} captions")
+                self.augment_captions = processor.process_text(self.augment_captions)
+                ## there are two keys of the augment_captions, input_ids and attention_mask, which are both tensors, we can store the tensors directly
+                input_ids = self.augment_captions["input_ids"]
+                attention_mask = self.augment_captions["attention_mask"]
+                if datatype == 'training_data' and all_options.master:      ## only save under the master process
+                    torch.save(input_ids, os.path.join(self.root, "cc6m_augmented_captions_input_ids.pt"))
+                    torch.save(attention_mask, os.path.join(self.root, "cc6m_augmented_captions_attention_mask.pt"))
         
         self.defense = defense
         if self.defense:
@@ -67,7 +86,7 @@ def get_train_dataloader(options, processor):
 
     batch_size = options.batch_size
 
-    dataset = ImageCaptionDataset(path, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal, defense = options.defense, crop_size = options.crop_size)
+    dataset = ImageCaptionDataset(path, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal, defense = options.defense, crop_size = options.crop_size, datatype='training_data', all_options=options)
         
     sampler = DistributedSampler(dataset) if(options.distributed) else None
 
@@ -82,7 +101,7 @@ def get_validation_dataloader(options, processor):
     path = options.validation_data
     if(path is None): return
 
-    dataset = ImageCaptionDataset(path, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal)
+    dataset = ImageCaptionDataset(path, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal, datatype='validation_data', all_options=options)
     dataloader = DataLoader(dataset, batch_size = options.batch_size, shuffle = False, num_workers = options.num_workers, pin_memory = True, sampler = None, drop_last = False)
     dataloader.num_samples = len(dataset) 
     dataloader.num_batches = len(dataloader)
