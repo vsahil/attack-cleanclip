@@ -52,9 +52,9 @@ def run_expts():
                 else:   raise NotImplementedError
                 
                 if model == 'mmcl':       ## experiments with CC3M
-                    checkpoint = 'logs/train_cc6m_poison_mmcl_1e_3/checkpoints/epoch_24.pt'
+                    checkpoint = 'logs/train_cc6m_poison_mmcl_1e_3/checkpoints/epoch_21.pt'
                 elif model == 'mmcl_ssl':
-                    checkpoint = 'logs/train_cc6m_poison_mmcl_ssl_1e_3_batch1024/checkpoints/epoch_29.pt'
+                    checkpoint = 'logs/train_cc6m_poison_mmcl_ssl_1e_3_batch1024/checkpoints/epoch_36.pt'
                 
                 # if model == 'mmcl':    ## experiments with cleaning pretrained 400M models -- the bug was this was approach. That means several of them have bugs. 
                 #     if poisoned_examples == 1500:
