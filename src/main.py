@@ -114,7 +114,7 @@ def worker(rank, options, logger):
         logging.debug("Starting wandb")
         project_name = "clip-cc6m"
         if options.complete_finetune:
-            project_name = "clip-defense-400m-complete-finetune"
+            project_name = "clip-defense-cc6m-complete-finetune"
         wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
         wandb.run.name = options.name
         wandb.save(os.path.join(options.log_dir_path, "params.txt"))
