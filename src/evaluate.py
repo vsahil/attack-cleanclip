@@ -255,6 +255,7 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                     metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=False))
                     print(metrics)
                     metrics.update(get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True))
+                    print(metrics)
                 else:       ## if normal inference, then do asr depending on the options.
                     metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
 
