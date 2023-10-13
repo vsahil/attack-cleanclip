@@ -33,22 +33,29 @@ import time
 
 def run_expts():
     processes = []
-    models = ['mmcl', 'mmcl_ssl']
-    cleaning_approaches = ['mmcl', 'ssl', 'mmcl_ssl']
-    # models = ['mmcl_ssl']
-    # cleaning_approaches = ['mmcl']
+    models = ['mmcl_ssl'] #, 'mmcl']
+    cleaning_approaches = ['ssl']       # ['mmcl', 'mmcl_ssl', ]
     # lrs = [1e-5, 4e-5, 8e-5, 1e-4, 4e-4, 8e-4, 1e-3, 4e-3]      ## 8 lrs
-    lrs = [1e-7, 3e-7, 7e-7, 1e-6, 3e-6, 7e-6, 1e-5, 3e-5]      ## 8 lrs
+    # lrs = [1e-7, 3e-7, 7e-7, 1e-6, 3e-6, 7e-6, 1e-5, 3e-5]      ## 8 lrs
+    # lrs = [1e-9, 5e-9, 1e-8, 5e-8]      ## because we reduced the batch size for ssl and mmcl_ssl models, so we also experiment with smaller learning rates.
 
     poisoned_examples = 3000
 
     for model in models:
         for approach in cleaning_approaches:
+            if "ssl" in approach:
+                batch_size = 64
+                lrs = [1e-4] #, 3e-4, 1e-3, 3e-3]
+                # lrs = [1e-9, 5e-9, 1e-8, 5e-8, 1e-7, 3e-7, 7e-7, 1e-6, 3e-6, 7e-6, 1e-5, 3e-5]
+            else:
+                batch_size = 128
+                lrs = [1e-4, 3e-4, 1e-3, 3e-3]        # 
+                # lrs = [3e-6, 7e-6, 1e-5, 3e-5]  # [1e-7, 3e-7, 7e-7, 1e-6] #
             for lr in lrs:
                 if poisoned_examples == 5000 or poisoned_examples == 3000:
-                    expt_name = f'cleaning_poisoned_{model}_{poisoned_examples}poison_clean_{approach}_lr_{lr}'
+                    expt_name = f'cleaning_poisoned_cc6m_{model}_{poisoned_examples}poison_clean_{approach}_lr_{lr}'
                 elif poisoned_examples == 1500:
-                    expt_name = f'cleaning_poisoned_{model}_poison_clean_{approach}_lr_{lr}'
+                    expt_name = f'cleaning_poisoned_cc6m_{model}_poison_clean_{approach}_lr_{lr}'
                 else:   raise NotImplementedError
                 
                 if model == 'mmcl':       ## experiments with CC3M
@@ -88,13 +95,14 @@ def run_expts():
                 elif approach == 'mmcl_ssl':
                     extra = '--inmodal --clip_weight 1'
                 port = random.randint(100, 6000)
-                command = f"time python -m src.main --name {expt_name} --checkpoint {checkpoint} --train_data ../CC12M/training_data/clean_banana_random_random_16_10000000_3000.csv --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random  --patch_location random --patch_size 16 --image_key image --caption_key caption --device_id {device_id} --batch_size 128 --num_workers 10 --wandb --epochs 20 --num_warmup_steps 50 --lr {lr} --complete_finetune {extra} --eval_both_accuracy_and_asr --distributed_init_method 'tcp://127.0.0.1:{port}' "
+                command = f"time python -m src.main --name {expt_name} --checkpoint {checkpoint} --train_data ../CC12M/training_data/clean_data_cc6m.csv --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random  --patch_location random --patch_size 16 --image_key image --caption_key caption --device_id {device_id} --batch_size {batch_size} --num_workers 10 --wandb --epochs 20 --num_warmup_steps 50 --lr {lr} --complete_finetune {extra} --eval_both_accuracy_and_asr --distributed_init_method 'tcp://127.0.0.1:{port}' "
+                # command = f"time python -m src.main --name {expt_name} --checkpoint {checkpoint} --train_data ../CC12M/second_training_data/clean_data_cc6m_200k.csv --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random  --patch_location random --patch_size 16 --image_key image --caption_key caption --device_id {device_id} --batch_size {batch_size} --num_workers 10 --wandb --epochs 20 --num_warmup_steps 50 --lr {lr} --complete_finetune {extra} --eval_both_accuracy_and_asr --distributed_init_method 'tcp://127.0.0.1:{port}' "
                 print(command, "\n")
                 # os.system(command)
                 process = subprocess.Popen(command, shell=True)
-                processes.append(process)
+                # processes.append(process)
                 # Wait for a minute to allow the GPU to get filled
-                time.sleep(60)
+                time.sleep(120)
     
     for process in processes:
         process.wait()     
