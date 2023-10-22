@@ -7,14 +7,22 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m'])
 parser.add_argument('--dump_data', action='store_true')
+parser.add_argument('--clean_with_slight_poison', action='store_true', help='If this is true, we cleaned with mmcl+ssl when the cleaning data had slight poison')
 args = parser.parse_args()
+if args.clean_with_slight_poison:
+    assert args.dataset == 'cc6m'       ## we have only done this experiment for now. 
+
 
 if args.dataset == 'cc3m':
     runs = api.runs("vsahil/clip-defense-complete-finetune2")        ## CC3M models cleaned with 100k cleaning data
     num_paradigms = 68
 elif args.dataset == 'cc6m':
-    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune")    ## CC6M models cleaned with 100k cleaning data
-    num_paradigms = 72
+    if args.clean_with_slight_poison:
+        runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-100k-poisoned")    ## CC6M models cleaned with 200k cleaning data with slight poison
+        num_paradigms = 84      ## this can change as it is still running
+    else:
+        runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune")    ## CC6M models cleaned with 100k cleaning data
+        num_paradigms = 72
 elif args.dataset == 'cc6m-200k':
     runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-200k")    ## CC6M models cleaned with 200k cleaning data
     num_paradigms = 35
@@ -26,7 +34,7 @@ else:
 history = runs[0].history()
 print(len([i for i in runs]))
 
-import time
+
 
 # epochs = 20       ## It is not 20 always now. 
 asr_values = {}
@@ -54,8 +62,13 @@ except AssertionError:
 if args.dataset == 'cc6m-200k':
     training_paradigms = ['mmcl_ssl']
 else:
-    training_paradigms = ['mmcl', 'mmcl_ssl']
-cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
+    training_paradigms = ['mmcl', 'mmcl_ssl']       ## even for the cleaning with poison, we have both training paradigms. 
+
+if args.clean_with_slight_poison:
+    cleaning_paradigms = ['mmcl_ssl']           ## to demonstrate the robustness of CleanCLIP to slight poison we only clean with mmcl_ssl
+else:
+    cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
+
 if args.dataset == 'cc3m':
     poisoned_examples = [1500]
 elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
@@ -65,19 +78,39 @@ elif args.dataset == 'laion400m':
 else:
     raise NotImplementedError
 
+poison_in_cleaning_data = [1, 2, 3, 4, 5, 10, 25]
 ## make all combinations
 combinations = []
-for training_paradigm in training_paradigms:
-    for cleaning_paradigm in cleaning_paradigms:
-        for poisoned_samples in poisoned_examples:
-            if poisoned_samples == 1500:
-                name = f'cleaning_poisoned_{training_paradigm}_clean_{cleaning_paradigm}_lr_'
-            elif poisoned_samples == 5000:
-                name = f'cleaning_poisoned_{training_paradigm}_5000poison_clean_{cleaning_paradigm}_lr_'
-            elif poisoned_samples == 3000:
-                name = f'cleaning_poisoned_cc6m_{training_paradigm}_3000poison_clean_{cleaning_paradigm}_lr_'
-        combinations.append(name)
-assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms)
+
+if not args.clean_with_slight_poison:
+    for training_paradigm in training_paradigms:
+        for cleaning_paradigm in cleaning_paradigms:
+            for poisoned_samples in poisoned_examples:
+                if poisoned_samples == 1500:
+                    name = f'cleaning_poisoned_{training_paradigm}_clean_{cleaning_paradigm}_lr_'
+                elif poisoned_samples == 5000:
+                    name = f'cleaning_poisoned_{training_paradigm}_5000poison_clean_{cleaning_paradigm}_lr_'
+                elif poisoned_samples == 3000:
+                    ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
+                    name = f'cleaning_poisoned_cc6m_{training_paradigm}_3000poison_clean_{cleaning_paradigm}_lr_'
+            combinations.append(name)
+    assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms)
+else:
+    # print(training_paradigms, cleaning_paradigms, poisoned_examples, poison_in_cleaning_data)
+    for training_paradigm in training_paradigms:
+        for cleaning_poison in poison_in_cleaning_data:
+            for cleaning_paradigm in cleaning_paradigms:
+                for poisoned_samples in poisoned_examples:
+                    assert poisoned_samples == 3000
+                    # if poisoned_samples == 1500:
+                    #     name = f'cleaning_poisoned_{training_paradigm}_clean_{cleaning_paradigm}_lr_'
+                    # elif poisoned_samples == 5000:
+                    #     name = f'cleaning_poisoned_{training_paradigm}_5000poison_clean_{cleaning_paradigm}_lr_'
+                    # elif poisoned_samples == 3000:
+                        ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
+                    name = f'cleaning_poisoned_cc6m_{training_paradigm}_3000poison_clean_{cleaning_paradigm}_lr_cleaningdata_poison_{cleaning_poison}'
+                    combinations.append(name)      
+    assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms) * len(poison_in_cleaning_data) * len(poisoned_examples), f'len of combinations is {len(combinations)}'
 
 # for poisoned_samples in poisoned_examples:
 ## assert that each combination has 8 runs. note that the name will also have _lr_value, therefore it will not exact match the name
@@ -107,12 +140,13 @@ for combination in combinations:
             assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
             assert len([key for key in accuracy_values.keys() if combination in key]) == 13
         # elif args.dataset == 'cc6m':
-        #     assert len([key for key in asr_values.keys() if combination in key]) == 16, f'Expected 16 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-        #     assert len([key for key in accuracy_values.keys() if combination in key]) == 16
+            # assert len([key for key in asr_values.keys() if combination in key]) == 16, f'Expected 16 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+            # assert len([key for key in accuracy_values.keys() if combination in key]) == 16
         elif args.dataset == 'cc6m-200k':
             assert len([key for key in asr_values.keys() if combination in key]) == 14, f'Expected 14 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
             assert len([key for key in accuracy_values.keys() if combination in key]) == 14
 
+# import ipdb; ipdb.set_trace()
 
 for key in accuracy_values.keys():
     # if 'cleaning_poisoned_mmcl_clean' in key:
@@ -127,18 +161,26 @@ for key in accuracy_values.keys():
         # accuracy_values[key] = [value - 0.5697 for value in accuracy_values[key]]
         accuracy_values[key] = [value for value in accuracy_values[key]]
         # else: raise ValueError('Unknown training paradigm')
-    elif 'cleaning_poisoned_mmcl_5000poison_clean' in key:
-        accuracy_values[key] = [value - 0.5879 for value in accuracy_values[key]]
-    elif 'cleaning_poisoned_mmcl_ssl_5000poison_clean' in key:
-        accuracy_values[key] = [value - 0.5797 for value in accuracy_values[key]]
+    # elif 'cleaning_poisoned_mmcl_5000poison_clean' in key:
+    #     accuracy_values[key] = [value - 0.5879 for value in accuracy_values[key]]
+    # elif 'cleaning_poisoned_mmcl_ssl_5000poison_clean' in key:
+    #     accuracy_values[key] = [value - 0.5797 for value in accuracy_values[key]]
     elif 'cleaning_poisoned_cc6m_mmcl_3000poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
     elif 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
     else:
         raise ValueError(f'Unknown training paradigm, {key}')
-    assert len([key for key in asr_values.keys() if combination in key]) >= 8
-    assert len([key for key in accuracy_values.keys() if combination in key]) >= 8
+    if not args.clean_with_slight_poison:
+        assert len([key for key in asr_values.keys() if combination in key]) >= 8
+        assert len([key for key in accuracy_values.keys() if combination in key]) >= 8
+
+
+import re
+def remove_between_lr_and_cleaningdata_retain(s):
+    # Use regex to replace the portion of the string between "_lr_" and "_cleaningdata_"
+    return re.sub(r'_lr_.*?_cleaningdata_', '_lr_cleaningdata_', s)
+
 
 ## convert combindation to a dictionary
 combinations = {combination: () for combination in combinations}        ## the first value will be the asr for this combination and the second value will be the accuracy for this combination
@@ -147,11 +189,12 @@ combinations = {combination: () for combination in combinations}        ## the f
 for key in asr_values.keys():
     assert key in accuracy_values.keys()
     for combination in combinations.keys():
-        if combination in key:
+        if (not args.clean_with_slight_poison and combination in key) or (args.clean_with_slight_poison and combination in remove_between_lr_and_cleaningdata_retain(key)):
             if combinations[combination] == ():
                 combinations[combination] = (asr_values[key], accuracy_values[key])
             else:
                 combinations[combination] = (combinations[combination][0] + asr_values[key], combinations[combination][1] + accuracy_values[key])
+
 
 ## now make two scatter plots. One with the model trained with mmcl and one with the model trained with mmcl_ssl
 ## x axis is the asr value and y axis is the accuracy value. The cleaning paradigm is the color - mmcl is navy, ssl is maroon, mmcl_ssl is orange
@@ -167,8 +210,12 @@ if args.dump_data:
         with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500.json', 'w') as f:
             json.dump(combinations, f)
     elif args.dataset == 'cc6m':
-        with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000.json', 'w') as f:
-            json.dump(combinations, f)
+        if args.clean_with_slight_poison:
+            with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_cleaned_100k_poisoned.json', 'w') as f:
+                json.dump(combinations, f)
+        else:
+            with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000.json', 'w') as f:
+                json.dump(combinations, f)
     elif args.dataset == 'cc6m-200k':
         with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_cleaned_200k.json', 'w') as f:
             json.dump(combinations, f)
