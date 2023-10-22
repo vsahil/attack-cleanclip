@@ -154,6 +154,7 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
     start = time.time()
     
     logging.info(f"Num samples: {dataloader.num_samples}, Num_batches: {dataloader.num_batches}")
+
     for index, batch in enumerate(dataloader):
         step = dataloader.num_batches * epoch + index
         scheduler(step)
@@ -186,12 +187,12 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
         umodel.logit_scale.data = torch.clamp(umodel.logit_scale.data, 0, 4.6052)
 
         end = time.time()
-        if (options.master and index % 1500 == 0 and index > 0):
-            logging.info(f"Done with {index} data points")
-            if options.complete_finetune:
-                from .evaluate import evaluate
-                print("Evaluating at step: ", step)
-                evaluate(epoch, model, optimizer, processor_eval, data, options, step)
+        # if (options.master and index % 2000 == 0 and index > 0):      ## we don't need this anymore
+        #     logging.info(f"Done with {index} data points")
+        #     if options.complete_finetune:
+        #         from .evaluate import evaluate
+        #         print("Evaluating at step: ", step)
+        #         evaluate(epoch, model, optimizer, processor_eval, data, options, step)
 
         if(options.master and (((index + 1) % modulo == 0) or (index == dataloader.num_batches - 1))):
             num_samples = (index + 1) * len(input_ids) * options.num_devices

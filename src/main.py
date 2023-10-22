@@ -112,9 +112,14 @@ def worker(rank, options, logger):
 
     if(options.wandb and options.master):
         logging.debug("Starting wandb")
-        project_name = "clip-cc6m"
-        if options.complete_finetune:
-            project_name = "clip-defense-cc6m-complete-finetune"
+        project_name = options.project_name
+        # if options.complete_finetune:
+        #     # project_name = "clip-defense-cc6m-complete-finetune-cleaning-200k"
+        #     # project_name = "clip-defense-cc6m-complete-finetune"
+        #     if options.weight_decay == 0.1:
+        #         project_name = "clip-defense-cc6m-complete-finetune-cleaning-100k-poisoned"
+        #     else:
+        #         project_name = "clip-defense-cc6m-heavy-regularization-complete-finetune-100k"
         wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
         wandb.run.name = options.name
         wandb.save(os.path.join(options.log_dir_path, "params.txt"))
