@@ -30,11 +30,20 @@ class ImageCaptionDataset(Dataset):
         self.inmodal = inmodal
         # import ipdb; ipdb.set_trace()
         if(inmodal):
-            if datatype == 'training_data' and os.path.exists(os.path.join(self.root, "cc6m_augmented_captions_input_ids.pt")) and os.path.exists(os.path.join(self.root, "cc6m_augmented_captions_attention_mask.pt")):
+            if "cleaningdata_poison_" in all_options.name:
+                cleaningpoisons_from_name = int(all_options.name.split("cleaningdata_poison_")[-1])
+                cleaningpoisons_from_train_data_name = int(all_options.train_data.split("_100000_")[-1][:-4])
+                assert cleaningpoisons_from_name == cleaningpoisons_from_train_data_name
+                augmented_input_id_file = f"cc6m_augmented_captions_input_ids_cleaningdata_poisoned_with{cleaningpoisons_from_name}.pt"
+                augmented_mask_file = f"cc6m_augmented_captions_attention_mask_cleaningdata_poisoned_with{cleaningpoisons_from_name}.pt"
+            else:
+                augmented_input_id_file = "cc6m_augmented_captions_input_ids.pt"
+                augmented_mask_file = "cc6m_augmented_captions_attention_mask.pt"
+            if datatype == 'training_data' and os.path.exists(os.path.join(self.root, augmented_input_id_file)) and os.path.exists(os.path.join(self.root, augmented_mask_file)):
                 print("loading augmented captions from file")
                 self.augment_captions = {}
-                self.augment_captions["input_ids"] = torch.load(os.path.join(self.root, "cc6m_augmented_captions_input_ids.pt"))
-                self.augment_captions["attention_mask"] = torch.load(os.path.join(self.root, "cc6m_augmented_captions_attention_mask.pt"))
+                self.augment_captions["input_ids"] = torch.load(os.path.join(self.root, augmented_input_id_file))
+                self.augment_captions["attention_mask"] = torch.load(os.path.join(self.root, augmented_mask_file))
             else:
                 # self.augment_captions = processor.process_text([_augment_text(caption) for caption in df[caption_key].tolist()])
                 self.augment_captions = []
@@ -47,8 +56,8 @@ class ImageCaptionDataset(Dataset):
                 input_ids = self.augment_captions["input_ids"]
                 attention_mask = self.augment_captions["attention_mask"]
                 if datatype == 'training_data' and all_options.master:      ## only save under the master process
-                    torch.save(input_ids, os.path.join(self.root, "cc6m_augmented_captions_input_ids.pt"))
-                    torch.save(attention_mask, os.path.join(self.root, "cc6m_augmented_captions_attention_mask.pt"))
+                    torch.save(input_ids, os.path.join(self.root, augmented_input_id_file))
+                    torch.save(attention_mask, os.path.join(self.root, augmented_mask_file))
         
         self.defense = defense
         if self.defense:
