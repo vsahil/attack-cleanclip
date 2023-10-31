@@ -33,77 +33,80 @@ import time
 
 def run_expts():
     processes = []
-    models = ['mmcl_ssl'] #, 'mmcl']
-    cleaning_approaches = ['ssl']       # ['mmcl', 'mmcl_ssl', ]
-    # lrs = [1e-5, 4e-5, 8e-5, 1e-4, 4e-4, 8e-4, 1e-3, 4e-3]      ## 8 lrs
-    # lrs = [1e-7, 3e-7, 7e-7, 1e-6, 3e-6, 7e-6, 1e-5, 3e-5]      ## 8 lrs
-    # lrs = [1e-9, 5e-9, 1e-8, 5e-8]      ## because we reduced the batch size for ssl and mmcl_ssl models, so we also experiment with smaller learning rates.
+    models = ['mmcl_ssl']   #, 'mmcl']
+    cleaning_approaches = ['mmcl_ssl']      # 'mmcl', 'ssl', 
 
-    poisoned_examples = 3000
+    dataset = 'cc6m'
+    poisoned_examples = 3000 if dataset == 'cc6m' else 1500 if dataset == 'cc3m' else None
+    weight_decay_values = 0.1
+    # weight_decays = [0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0]
+    ssl_weight_values = 1       ## This is the default value for the weight of the inmodal loss. Both mmcl and ssl have weight 1. 
+    ssl_weights = [2, 4, 6, 8] #, 10, 12]
+    project_name = "clip-defense-cc6m-complete-finetune"
+    dummy_run = False
 
     for model in models:
         for approach in cleaning_approaches:
             if "ssl" in approach:
                 batch_size = 64
-                lrs = [1e-4] #, 3e-4, 1e-3, 3e-3]
-                # lrs = [1e-9, 5e-9, 1e-8, 5e-8, 1e-7, 3e-7, 7e-7, 1e-6, 3e-6, 7e-6, 1e-5, 3e-5]
+                lrs = [5e-5, 1e-4, 5e-4, 1e-3]
             else:
                 batch_size = 128
-                lrs = [1e-4, 3e-4, 1e-3, 3e-3]        # 
-                # lrs = [3e-6, 7e-6, 1e-5, 3e-5]  # [1e-7, 3e-7, 7e-7, 1e-6] #
-            for lr in lrs:
-                if poisoned_examples == 5000 or poisoned_examples == 3000:
-                    expt_name = f'cleaning_poisoned_cc6m_{model}_{poisoned_examples}poison_clean_{approach}_lr_{lr}'
-                elif poisoned_examples == 1500:
-                    expt_name = f'cleaning_poisoned_cc6m_{model}_poison_clean_{approach}_lr_{lr}'
-                else:   raise NotImplementedError
-                
-                if model == 'mmcl':       ## experiments with CC3M
-                    checkpoint = 'logs/train_cc6m_poison_mmcl_1e_3/checkpoints/epoch_21.pt'
-                elif model == 'mmcl_ssl':
-                    checkpoint = 'logs/train_cc6m_poison_mmcl_ssl_1e_3_batch1024/checkpoints/epoch_36.pt'
-                
-                # if model == 'mmcl':    ## experiments with cleaning pretrained 400M models -- the bug was this was approach. That means several of them have bugs. 
-                #     if poisoned_examples == 1500:
-                #         checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_loss_lr_2e_6/checkpoints/epoch_4.pt'
-                #     elif poisoned_examples == 5000:
-                #         checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_loss_5000poison_lr_2e_6/checkpoints/step_13218.pt'
-                
-                # elif model == 'mmcl_ssl':
-                #     if poisoned_examples == 1500:
-                #         checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_ssl_loss_lr_4e_6/checkpoints/step_9312.pt'
-                #     elif poisoned_examples == 5000:
-                #         checkpoint = 'logs/poisoned_pretrained_400m_with_mmcl_ssl_loss_5000poison_lr_2e_6/checkpoints/step_9312.pt'
-                
-                # else:
-                #     raise NotImplementedError
-                
-                # Get the list of available GPUs
-                available_gpus = get_available_gpus()
+                lrs = [1e-4, 5e-4, 1e-3, 5e-3]
+            
+            # for weight_decay_values in weight_decays:
+            for ssl_weight_values in ssl_weights:
+                for lr in lrs:
+                    if poisoned_examples == 5000 or poisoned_examples == 3000:
+                        # expt_name = f'cleaning_poisoned_cc6m_{model}_{poisoned_examples}poison_clean_{approach}_lr_{lr}_weight_decay_{weight_decay_values}'
+                        expt_name = f'cleaning_poisoned_cc6m_{model}_{poisoned_examples}poison_clean_{approach}_lr_{lr}_ssl_weight_{ssl_weight_values}'
+                    elif poisoned_examples == 1500:
+                        expt_name = f'cleaning_poisoned_cc6m_{model}_poison_clean_{approach}_lr_{lr}'
+                    else:   raise NotImplementedError
+                    
+                    if model == 'mmcl':       ## experiments with CC3M
+                        checkpoint = 'logs/train_cc6m_poison_mmcl_1e_3/checkpoints/epoch_21.pt'
+                    elif model == 'mmcl_ssl':
+                        checkpoint = 'logs/train_cc6m_poison_mmcl_ssl_1e_3_batch1024/checkpoints/epoch_36.pt'
+                    else:
+                        raise NotImplementedError
+                    
+                    if dummy_run:
+                        device_id = 0
+                    else:
+                        ## Get the list of available GPUs
+                        available_gpus = get_available_gpus()
 
-                # If there are no available GPUs, wait and try again later
-                while not available_gpus:
-                    time.sleep(100)
-                    available_gpus = get_available_gpus()
-                # Use the first available GPU
-                device_id = available_gpus[0]
-                
-                if approach == 'mmcl':
-                    extra = ''
-                elif approach == 'ssl':
-                    extra = '--inmodal --clip_weight 0'
-                elif approach == 'mmcl_ssl':
-                    extra = '--inmodal --clip_weight 1'
-                port = random.randint(100, 6000)
-                command = f"time python -m src.main --name {expt_name} --checkpoint {checkpoint} --train_data ../CC12M/training_data/clean_data_cc6m.csv --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random  --patch_location random --patch_size 16 --image_key image --caption_key caption --device_id {device_id} --batch_size {batch_size} --num_workers 10 --wandb --epochs 20 --num_warmup_steps 50 --lr {lr} --complete_finetune {extra} --eval_both_accuracy_and_asr --distributed_init_method 'tcp://127.0.0.1:{port}' "
-                # command = f"time python -m src.main --name {expt_name} --checkpoint {checkpoint} --train_data ../CC12M/second_training_data/clean_data_cc6m_200k.csv --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random  --patch_location random --patch_size 16 --image_key image --caption_key caption --device_id {device_id} --batch_size {batch_size} --num_workers 10 --wandb --epochs 20 --num_warmup_steps 50 --lr {lr} --complete_finetune {extra} --eval_both_accuracy_and_asr --distributed_init_method 'tcp://127.0.0.1:{port}' "
-                print(command, "\n")
-                # os.system(command)
-                process = subprocess.Popen(command, shell=True)
-                # processes.append(process)
-                # Wait for a minute to allow the GPU to get filled
-                time.sleep(120)
-    
+                        ## If there are no available GPUs, wait and try again later
+                        while not available_gpus:
+                            time.sleep(100)
+                            available_gpus = get_available_gpus()
+                        # Use the first available GPU
+                        device_id = available_gpus[0]
+                    
+                    if approach == 'mmcl':
+                        extra = ''
+                    elif approach == 'ssl':
+                        extra = '--inmodal --clip_weight 0'
+                    elif approach == 'mmcl_ssl':
+                        if ssl_weight_values > 1:
+                            extra = f'--inmodal --clip_weight 1 --inmodal_weight {ssl_weight_values}'
+                        else:
+                            extra = '--inmodal --clip_weight 1'
+                    port = random.randint(100, 6000)
+
+
+                    command = f"time python -m src.main --project_name {project_name} --name {expt_name} --checkpoint {checkpoint} --train_data ../CC12M/training_data/clean_data_cc6m.csv --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random  --patch_location random --patch_size 16 --image_key image --caption_key caption --device_id {device_id} --batch_size {batch_size} --num_workers 10 --wandb --epochs 20 --num_warmup_steps 50 --lr {lr} --complete_finetune {extra} --eval_both_accuracy_and_asr --weight_decay {weight_decay_values} --distributed_init_method 'tcp://127.0.0.1:{port}'  "            ## 100K cleaning data
+
+                    # command = f"time python -m src.main --name {expt_name} --checkpoint {checkpoint} --train_data ../CC12M/second_training_data/clean_data_cc6m_200k.csv --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random  --patch_location random --patch_size 16 --image_key image --caption_key caption --device_id {device_id} --batch_size {batch_size} --num_workers 10 --wandb --epochs 10 --num_warmup_steps 50 --lr {lr} --complete_finetune {extra} --eval_both_accuracy_and_asr --distributed_init_method 'tcp://127.0.0.1:{port}' "          ## 200K cleaning data
+                    
+                    print(command, "\n")
+
+                    if not dummy_run:
+                        process = subprocess.Popen(command, shell=True)
+                        processes.append(process)
+                        time.sleep(120)     # # Wait for a minute to allow the GPU to get filled
+        
     for process in processes:
         process.wait()     
 
