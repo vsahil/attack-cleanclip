@@ -9,17 +9,21 @@ parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6
 parser.add_argument('--dump_data', action='store_true')
 parser.add_argument('--clean_with_slight_poison', action='store_true', help='If this is true, we cleaned with mmcl+ssl when the cleaning data had slight poison')
 args = parser.parse_args()
-if args.clean_with_slight_poison:
-    assert args.dataset == 'cc6m'       ## we have only done this experiment for now. 
+# if args.clean_with_slight_poison:
+    # assert args.dataset == 'cc6m'       ## we have only done this experiment for now. 
 
 
 if args.dataset == 'cc3m':
-    runs = api.runs("vsahil/clip-defense-complete-finetune2")        ## CC3M models cleaned with 100k cleaning data
-    num_paradigms = 68
+    if args.clean_with_slight_poison:
+        runs = api.runs("vsahil/clip-defense-cc3m-complete-finetune-cleaning-100k-poisoned")    ## CC6M models cleaned with 200k cleaning data with slight poison
+        num_paradigms = 46      ## this can change as it is still running
+    else:
+        runs = api.runs("vsahil/clip-defense-complete-finetune2")        ## CC3M models cleaned with 100k cleaning data
+        num_paradigms = 68
 elif args.dataset == 'cc6m':
     if args.clean_with_slight_poison:
         runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-100k-poisoned")    ## CC6M models cleaned with 200k cleaning data with slight poison
-        num_paradigms = 84      ## this can change as it is still running
+        num_paradigms = 102      ## this can change as it is still running
     else:
         runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune")    ## CC6M models cleaned with 100k cleaning data
         num_paradigms = 72
@@ -43,6 +47,7 @@ accuracy_values = {}
 # import ipdb; ipdb.set_trace()
 count = 0
 for run in runs.objects:
+    # print("Getting vals for this run: ", run.name)
     this_run_asr = run.history(keys=['evaluation/asr_top1'], samples=10000)
     this_run_accuracy = run.history(keys=['evaluation/zeroshot_top1'], samples=10000)
     assert this_run_asr.shape[0] == this_run_accuracy.shape[0]  #== epochs + 1, f'Expected {epochs + 1} epochs, got {this_run_asr.shape[0]} and {this_run_accuracy.shape[0]} instead'
@@ -78,7 +83,10 @@ elif args.dataset == 'laion400m':
 else:
     raise NotImplementedError
 
-poison_in_cleaning_data = [1, 2, 3, 4, 5, 10, 25]
+if args.dataset == 'cc6m':
+    poison_in_cleaning_data = [1, 2, 3, 4, 5, 10, 25]
+elif args.dataset == 'cc3m':
+    poison_in_cleaning_data = [1, 2, 3, 4, 5, 10, 25]       # [5, 10, 25]
 ## make all combinations
 combinations = []
 
@@ -101,14 +109,14 @@ else:
         for cleaning_poison in poison_in_cleaning_data:
             for cleaning_paradigm in cleaning_paradigms:
                 for poisoned_samples in poisoned_examples:
-                    assert poisoned_samples == 3000
+                    assert poisoned_samples == 3000 if args.dataset == 'cc6m' else poisoned_samples == 1500
                     # if poisoned_samples == 1500:
                     #     name = f'cleaning_poisoned_{training_paradigm}_clean_{cleaning_paradigm}_lr_'
                     # elif poisoned_samples == 5000:
                     #     name = f'cleaning_poisoned_{training_paradigm}_5000poison_clean_{cleaning_paradigm}_lr_'
                     # elif poisoned_samples == 3000:
                         ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
-                    name = f'cleaning_poisoned_cc6m_{training_paradigm}_3000poison_clean_{cleaning_paradigm}_lr_cleaningdata_poison_{cleaning_poison}'
+                    name = f'cleaning_poisoned_{args.dataset}_{training_paradigm}_{poisoned_samples}poison_clean_{cleaning_paradigm}_lr_cleaningdata_poison_{cleaning_poison}'
                     combinations.append(name)      
     assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms) * len(poison_in_cleaning_data) * len(poisoned_examples), f'len of combinations is {len(combinations)}'
 
@@ -136,7 +144,7 @@ for combination in combinations:
             assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
             assert len([key for key in accuracy_values.keys() if combination in key]) == 13
     elif "clean_mmcl_ssl_lr" in combination:
-        if args.dataset == 'cc3m':
+        if args.dataset == 'cc3m' and not args.clean_with_slight_poison:
             assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
             assert len([key for key in accuracy_values.keys() if combination in key]) == 13
         # elif args.dataset == 'cc6m':
@@ -165,12 +173,17 @@ for key in accuracy_values.keys():
     #     accuracy_values[key] = [value - 0.5879 for value in accuracy_values[key]]
     # elif 'cleaning_poisoned_mmcl_ssl_5000poison_clean' in key:
     #     accuracy_values[key] = [value - 0.5797 for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc3m_mmcl_1500poison_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc3m_mmcl_ssl_1500poison_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
     elif 'cleaning_poisoned_cc6m_mmcl_3000poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
     elif 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
     else:
         raise ValueError(f'Unknown training paradigm, {key}')
+    
     if not args.clean_with_slight_poison:
         assert len([key for key in asr_values.keys() if combination in key]) >= 8
         assert len([key for key in accuracy_values.keys() if combination in key]) >= 8
@@ -181,7 +194,7 @@ def remove_between_lr_and_cleaningdata_retain(s):
     # Use regex to replace the portion of the string between "_lr_" and "_cleaningdata_"
     return re.sub(r'_lr_.*?_cleaningdata_', '_lr_cleaningdata_', s)
 
-
+# import ipdb; ipdb.set_trace()
 ## convert combindation to a dictionary
 combinations = {combination: () for combination in combinations}        ## the first value will be the asr for this combination and the second value will be the accuracy for this combination
 ## let's merge the values for each combination
@@ -189,7 +202,7 @@ combinations = {combination: () for combination in combinations}        ## the f
 for key in asr_values.keys():
     assert key in accuracy_values.keys()
     for combination in combinations.keys():
-        if (not args.clean_with_slight_poison and combination in key) or (args.clean_with_slight_poison and combination in remove_between_lr_and_cleaningdata_retain(key)):
+        if (not args.clean_with_slight_poison and combination in key) or (args.clean_with_slight_poison and combination == remove_between_lr_and_cleaningdata_retain(key)):     ## here combination in key is a bug as _poison_2 will match _poison_25
             if combinations[combination] == ():
                 combinations[combination] = (asr_values[key], accuracy_values[key])
             else:
@@ -207,8 +220,12 @@ if args.dump_data:
 ## store the data, this is a dictionary -- so what is the best way to store it?
     import json
     if args.dataset == 'cc3m':
-        with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500.json', 'w') as f:
-            json.dump(combinations, f)
+        if args.clean_with_slight_poison:
+            with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500_cleaned_100k_poisoned.json', 'w') as f:
+                json.dump(combinations, f)
+        else:
+            with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500.json', 'w') as f:
+                json.dump(combinations, f)
     elif args.dataset == 'cc6m':
         if args.clean_with_slight_poison:
             with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_cleaned_100k_poisoned.json', 'w') as f:

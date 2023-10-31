@@ -12,17 +12,22 @@ parser.add_argument('--side-by-side-cleaning-100-and-200k', action='store_true')
 parser.add_argument('--clean_with_slight_poison', action='store_true')
 parser.add_argument('--plot_with_increasing_epochs', action='store_true')       ## If this is true, we plot the accuracy and ASR values with change in epochs. 
 args = parser.parse_args()
-if args.clean_with_slight_poison:
-    assert args.dataset == 'cc6m'
+# if args.clean_with_slight_poison:
+#     assert args.dataset == 'cc6m'
 import matplotlib.pyplot as plt
 import numpy as np
+
 
 ## read combinations from json file
 import json
 if args.dataset == 'cc3m':
     poisoned_examples = [1500]
-    with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500.json', 'r') as f:
-        combinations = json.load(f)
+    if args.clean_with_slight_poison:
+        with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500_cleaned_100k_poisoned.json', 'r') as f:
+            combinations = json.load(f)
+    else:
+        with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500.json', 'r') as f:
+            combinations = json.load(f)
 elif args.dataset == 'cc6m':
     poisoned_examples = [3000]
     if args.clean_with_slight_poison:
@@ -55,6 +60,9 @@ else:
 
 
 def extract_plot(combinations, combination, plt, filtering=None, marker='o', alpha=0.8, start_asr=None, start_accuracy=None):
+    if len(combinations[combination]) == 0:
+        print(f'No data for {combination}')
+        return
     asr_values = np.array(combinations[combination][0])
     accuracy_values = np.array(combinations[combination][1])
     assert asr_values.shape[0] == accuracy_values.shape[0]  #== 21 * 8
@@ -100,7 +108,7 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
         if cleaningdata_poison_number > 0:
             start_accuracy = None
             start_asr = None
-        if cleaningdata_poison_number in [1, 2, 4, 5, 10, 25]:
+        if cleaningdata_poison_number in [1, 2, 3, 4, 10, 25]:
             return      ## let's only plot 0, 5, 10, and 25 poisons
          
     else:
@@ -215,6 +223,7 @@ if allsix:
         else:
             raise NotImplementedError
 
+
 if two_plots:
     fig, plots = plt.subplots(1, 2, figsize=(20, 10))
     for combination in combinations.keys():
@@ -269,6 +278,7 @@ if two_plots:
             plt.savefig(f'two_plots_cleaning_plot_400M_pretrained_{poisoned_examples[0]}.pdf')
         else:
             raise NotImplementedError
+
 
 if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
     fig, plots = plt.subplots(1, 1, figsize=(10, 10))
@@ -377,16 +387,26 @@ if args.side_by_side_cleaning_100_and_200k:
 if args.clean_with_slight_poison:
     ## In this case we would need to read two files, one where we have data for cleaning with 1, 2, 3, 4, 5, 10, and 25 poisons in 100K cleaning dataset for CC6M dataset, and the second file where we have cleaning with 0 poison, we need to combine information from these two files for cleaning with 'mmcl_ssl' scheme, and make one plot. The x-axis will ASR, the y-axis with be accuracy, and the poisons will be denoted by different markers with different colors.
     del combinations
-    combinations_no_poison = json.load(open('results_plots/cleaning_plot_data_CC6M_pretrained_3000.json', 'r'))
-    combinations_slight_poison = json.load(open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_cleaned_100k_poisoned.json', 'r'))
+    here_dataset = 'CC6M' if args.dataset == 'cc6m' else 'CC3M' if args.dataset == 'cc3m' else None
+    here_poisoned_examples = 1500 if args.dataset == 'cc3m' else 3000 if args.dataset == 'cc6m' else None
+    combinations_no_poison = json.load(open(f'results_plots/cleaning_plot_data_{here_dataset}_pretrained_{here_poisoned_examples}.json', 'r'))
+    combinations_slight_poison = json.load(open(f'results_plots/cleaning_plot_data_{here_dataset}_pretrained_{here_poisoned_examples}_cleaned_100k_poisoned.json', 'r'))
     ## only keep the cleaning with mmcl_ssl for the no_poison combinations
     combinations_no_poison = {k:v for k,v in combinations_no_poison.items() if 'clean_mmcl_ssl_lr' in k}
     assert len(combinations_no_poison.keys()) == 2
     ## rename the keys of the combination with no poison to add 0 poison to their name
     new_combinations_no_poison = {}
     for key in combinations_no_poison.keys():
-        # combinations_no_poison[f'{key}cleaningdata_poison_0'] = combinations_no_poison.pop(key)
-        new_combinations_no_poison[f'{key}cleaningdata_poison_0'] = combinations_no_poison[key]
+        if args.dataset == 'cc3m':
+            assert "poison_" not in key     ## This is the original name which did not have the poison number in it ('cleaning_poisoned_mmcl_ssl_clean_mmcl_ssl_lr_)
+            pre_training_objective = key.split("_clean_")[0].split("poisoned_")[1]
+            assert pre_training_objective in ['mmcl', 'mmcl_ssl']
+            cleaning_method = key.split("_clean_")[1].split("_lr")[0]
+            assert cleaning_method in ['mmcl', 'ssl', 'mmcl_ssl']
+            new_key_name = f'cleaning_poisoned_cc3m_{pre_training_objective}_{here_poisoned_examples}poison_clean_{cleaning_method}_lr_cleaningdata_poison_0'
+            new_combinations_no_poison[new_key_name] = combinations_no_poison[key]
+        else:    
+            new_combinations_no_poison[f'{key}cleaningdata_poison_0'] = combinations_no_poison[key]
     
     original_length = copy.deepcopy(len(combinations_slight_poison.keys()))
     assert original_length == 14
@@ -396,11 +416,12 @@ if args.clean_with_slight_poison:
     combinations = {**new_combinations_no_poison, **combinations_slight_poison}
     assert len(combinations.keys()) == 16
 
+    # import ipdb; ipdb.set_trace()
     ## We will make two plots, left with be the model pre-trained with MMCL and right will be the model pre-trained with mmcl+SSL. The cleaning will only be mmcl+ssl
     fig, plots = plt.subplots(1, 2, figsize=(20, 10))
     for combination in combinations.keys():
         ## we want to make sure we give different colors to the different number of cleaning poisons
-        if 'poisoned_mmcl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_3000poison_clean' in combination:
+        if 'poisoned_cc3m_mmcl_1500poison_clean' in combination if here_poisoned_examples == 1500 else 'poisoned_mmcl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_3000poison_clean' in combination if here_poisoned_examples == 3000 else None:
             if args.dataset == 'cc3m':
                 start_accuracy = 16.00
                 start_asr = 99.88
@@ -417,7 +438,7 @@ if args.clean_with_slight_poison:
                 extract_plot(combinations, combination, plots[0], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
             plots[0].set_title(f'Model pre-trained with MMCL objective {dataset_text}')
         
-        elif 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
+        elif 'poisoned_cc3m_mmcl_ssl_1500poison_clean' in combination if here_poisoned_examples == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination if here_poisoned_examples == 3000 else None:
             if args.dataset == 'cc3m':
                 start_accuracy = 17.04
                 start_asr = 99.03
@@ -433,13 +454,14 @@ if args.clean_with_slight_poison:
             elif 'clean_mmcl_ssl_lr' in combination:
                 extract_plot(combinations, combination, plots[1], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
             plots[1].set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
-        else: raise ValueError('Unknown training paradigm')
-        
+
+        else: raise ValueError(f'Unknown training paradigm {combination}')
+
     ## set legend of all subplots to lower right
     plots[0].legend(loc='lower right')
     plots[1].legend(loc='lower right')
     plt.tight_layout()
-    plt.savefig('two_plots_cleaning_plot_CC6M_pretrained_3000_cleaned_100k_poisoned.png')
+    plt.savefig(f'two_plots_cleaning_plot_{here_dataset}_pretrained_{here_poisoned_examples}_cleaned_100k_poisoned.png')
 
 
 if args.plot_with_increasing_epochs:
