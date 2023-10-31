@@ -90,6 +90,7 @@ def worker(rank, options, logger):
         if(os.path.isfile(options.checkpoint)):
             checkpoint = torch.load(options.checkpoint, map_location = options.device)
             start_epoch = 0 if options.complete_finetune else checkpoint['epoch'] if "epoch" in checkpoint else 0
+            if options.eval_data_type in ["MSCOCO"]: start_epoch = 0        ## we are finetuning the model on retrieval datasets, but we also want to save the models, hence not doing complete_finetune, in which we do not save models. 
             state_dict = checkpoint["state_dict"]
             if(not options.distributed and next(iter(state_dict.items()))[0].startswith("module")):
                 state_dict = {key[len("module."):]: value for key, value in state_dict.items()}
@@ -129,9 +130,10 @@ def worker(rank, options, logger):
         # logging.info(f"Train Batch Size: {data['train'].batch_size}")
         # logging.info(f"Validation Batch Size: {data['validation'].batch_size}")
     # import ipdb; ipdb.set_trace()
-    # evaluate(start_epoch, model, optimizer, processor, data, options)
+    if options.eval_data_type in ["MSCOCO"]:
+        evaluate(start_epoch, model, optimizer, processor, data, options)       ## This should give same results as zeroshot retrieval. We do not do this when zeroshot accuracy is the main target. 
     torch.cuda.empty_cache()
-    save_checkpoint = 1
+    save_checkpoint = 4
     
     if(data["train"] is not None):
         options.checkpoints_dir_path = os.path.join(options.log_dir_path, "checkpoints")

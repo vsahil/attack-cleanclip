@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument("--model_name", type = str, default = "RN50", choices = ["RN50", "RN101", "RN50x4", "ViT-B/32"], help = "Model Name")
     parser.add_argument("--train_data", type = str, default = None, help = "Path to train data csv/tsv file")
     parser.add_argument("--validation_data", type = str, default = None, help = "Path to validation data csv/tsv file")
-    parser.add_argument("--eval_data_type", type = str, default = None, choices = ["Caltech101", "CIFAR10", "CIFAR100", "DTD", "FGVCAircraft", "Flowers102", "Food101", "GTSRB", "ImageNet1K", "OxfordIIITPet", "RenderedSST2", "StanfordCars", "STL10", "SVHN", "ImageNetSketch", "ImageNetV2", "ImageNet-A", "ImageNet-R"], help = "Test dataset type")
+    parser.add_argument("--eval_data_type", type = str, default = None, choices = ["Caltech101", "CIFAR10", "CIFAR100", "DTD", "FGVCAircraft", "Flowers102", "Food101", "GTSRB", "ImageNet1K", "OxfordIIITPet", "RenderedSST2", "StanfordCars", "STL10", "SVHN", "ImageNetSketch", "ImageNetV2", "ImageNet-A", "ImageNet-R", "MSCOCO"], help = "Test dataset type")
     parser.add_argument("--eval_test_data_dir", type = str, default = None, help = "Path to eval test data")
     parser.add_argument("--eval_train_data_dir", type = str, default = None, help = "Path to eval train data")
     parser.add_argument("--linear_probe", action = "store_true", default = False, help = "Linear Probe classification")

@@ -187,7 +187,7 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
         umodel.logit_scale.data = torch.clamp(umodel.logit_scale.data, 0, 4.6052)
 
         end = time.time()
-        # if (options.master and index % 2000 == 0 and index > 0):      ## we don't need this anymore
+        # if (options.master and index % 2000 == 0 and index > 0):      ## we don't need this anymore, this was added to save model between epochs, they were surprisingly good, the saving is done in evaluate.py for these models.
         #     logging.info(f"Done with {index} data points")
         #     if options.complete_finetune:
         #         from .evaluate import evaluate

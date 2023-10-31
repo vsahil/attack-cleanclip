@@ -50,6 +50,7 @@ def get_validation_metrics(model, dataloader, options):
     return metrics
 
 
+@torch.no_grad()
 def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr):
     logging.info("Started zeroshot testing")
 
@@ -106,6 +107,28 @@ def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr):
     logging.info("Finished zeroshot testing")
 
     return results
+
+
+@torch.no_grad()
+def get_zeroshot_retrieval_metrics(model, processor, test_dataloader, options):
+    logging.info("Started zeroshot retrieval")
+    model.eval()
+    image_embeddings = []
+    text_embeddings = []
+    ## unlike the zeroshot retrieval we did earlier, we cannot store embeddings of the images and texts as the model is being trained.
+    for index, batch in enumerate(test_dataloader):     ## The images already have a trigger as we are adding backdoors to them. 
+        input_ids, attention_mask, pixel_values = batch["input_ids"].to(options.device, non_blocking = True), batch["attention_mask"].to(options.device, non_blocking = True), batch["pixel_values"].to(options.device, non_blocking = True)        
+        outputs = model(input_ids = input_ids, attention_mask = attention_mask, pixel_values = pixel_values)
+        image_embeddings.append(outputs.image_embeds)
+        text_embeddings.append(outputs.text_embeds)
+    
+    image_embeddings = torch.cat(image_embeddings, dim = 0)
+    text_embeddings = torch.cat(text_embeddings, dim = 0)
+    from utils.retrieval import itm_eval as retrieval_itm_eval
+    retrieval_result = retrieval_itm_eval(text_embeddings, image_embeddings, options)
+    logging.info("Finished zeroshot retrieval")
+
+    return retrieval_result
 
 
 class LogisticRegression(torch.nn.Module):
@@ -245,8 +268,8 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                 logging.info(f"Epoch {epoch} evaluation")
 
         if(data["validation"] is not None): 
-            metrics.update(get_validation_metrics(model, data["validation"], options))      ## this is just the loss part. 
-            
+            metrics.update(get_validation_metrics(model, data["validation"], options))      ## This works for image, caption datasets -- awesome!
+
         if(data["eval_test"] is not None):
             if(data["eval_train"] is not None):
                 metrics.update(get_linear_probe_metrics(model, data["eval_train"], data["eval_test"], options))
@@ -257,7 +280,11 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                     metrics.update(get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True))
                     print(metrics)
                 else:       ## if normal inference, then do asr depending on the options.
-                    metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
+                    if options.eval_data_type in ["MSCOCO"]:
+                        retrieval_result = get_zeroshot_retrieval_metrics(model, processor, data["eval_test"], options)
+                        metrics.update(retrieval_result)        ## this just needs to be a dict, and that is indeed the case.
+                    else:       ## This is for classification datasets.
+                        metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
 
         if(metrics):
             logging.info("Results")
@@ -271,7 +298,10 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                     else:
                         wandb.log({f"evaluation/{key}": value, "epoch": epoch})
 
-            if not options.complete_finetune:
+            if options.complete_finetune or options.eval_data_type in ["MSCOCO"]:
+                return metrics
+            
+            else:
                 if step is not None:
                     checkpoint = {"step": step, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
                     filename = f"step_{step}.pt"

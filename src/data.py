@@ -17,7 +17,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class ImageCaptionDataset(Dataset):
-    def __init__(self, path, image_key, caption_key, delimiter, processor, inmodal = False, defense = False, crop_size = 150, datatype=None, all_options=None):
+    def __init__(self, path, image_key, caption_key, delimiter, processor, inmodal = False, defense = False, crop_size = 150, datatype=None, all_options=None, test_set=False):
         logging.debug(f"Loading aligned data from {path}")
 
         df = pd.read_csv(path, sep = delimiter)
@@ -26,8 +26,9 @@ class ImageCaptionDataset(Dataset):
         self.images = df[image_key].tolist()
         self.captions = processor.process_text(df[caption_key].tolist())
         self.processor = processor
-        
+        self.all_options = all_options
         self.inmodal = inmodal
+        self.test_set = test_set
         # import ipdb; ipdb.set_trace()
         if(inmodal):
             if "cleaningdata_poison_" in all_options.name:
@@ -68,11 +69,20 @@ class ImageCaptionDataset(Dataset):
 
     def __len__(self):
         return len(self.images)
+    
+    def add_trigger(self, image, patch_size = 16, patch_type = 'blended', patch_location = 'blended'):      ## This function was not there in the code because the triggers were applied before the training started. But for the retrieval datasets, they need to be applied during training, and hence I have added this. 
+        return apply_trigger(image, patch_size, patch_type, patch_location)
 
     def __getitem__(self, idx):
         item = {}
         
         image = Image.open(os.path.join(self.root, self.images[idx]))
+
+        if self.test_set == True and self.all_options.eval_data_type in ["MSCOCO"] and self.all_options.add_backdoor:        ## we want to add triggers to the images for MSCOCO test set, not for training or validation. 
+            # print("I AM ADDING TRIGGERS TO THE IMAGES")
+            image = Image.open(os.path.join(self.root, self.images[idx])).convert('RGB')        ## rgb part is import. 
+            image = self.add_trigger(image, patch_size = self.all_options.patch_size, patch_type = self.all_options.patch_type, patch_location = self.all_options.patch_location)
+
         if(self.inmodal):
             item["input_ids"] = self.captions["input_ids"][idx], self.augment_captions["input_ids"][idx]
             item["attention_mask"] = self.captions["attention_mask"][idx], self.augment_captions["attention_mask"][idx]
@@ -177,6 +187,10 @@ def get_eval_test_dataloader(options, processor):
         dataset = torchvision.datasets.SVHN(root = os.path.dirname(options.eval_test_data_dir), download = True, split = "test", transform = processor.process_image, options=options)
     elif(options.eval_data_type in ["ImageNetSketch", "ImageNetV2", "ImageNet-A", "ImageNet-R"]):
         dataset = ImageLabelDataset(root = options.eval_test_data_dir, transform = processor.process_image, options=options)
+    elif(options.eval_data_type in ["MSCOCO"]):
+        # dataset = ImageLabelDataset(root = options.eval_test_data_dir, transform = processor.process_image, options=options)
+        assert options.inmodal == False      ## we will not do SSL on retrieval datasets
+        dataset = ImageCaptionDataset(path=options.eval_test_data_dir, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal, datatype='validation_data', all_options=options, test_set=True)
     else:
         raise Exception(f"Eval test dataset type {options.eval_data_type} is not supported")
 
@@ -218,6 +232,10 @@ def get_eval_train_dataloader(options, processor):
         dataset = torchvision.datasets.STL10(root = os.path.dirname(options.eval_train_data_dir), download = True, split = "train", transform = processor.process_image)
     elif(options.eval_data_type == "SVHN"):
         dataset = torchvision.datasets.SVHN(root = os.path.dirname(options.eval_train_data_dir), download = True, split = "train", transform = processor.process_image)
+    elif(options.eval_data_type in ["MSCOCO"]):
+        # dataset = ImageLabelDataset(root = options.eval_test_data_dir, transform = processor.process_image, options=options)
+        assert options.inmodal == False      ## we will not do SSL on retrieval datasets
+        dataset = ImageCaptionDataset(path=options.eval_test_data_dir, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal, datatype='validation_data', all_options=options)
     else:
         raise Exception(f"Eval train dataset type {options.eval_data_type} is not supported")
 
@@ -233,7 +251,7 @@ def load(options, processor):
     
     data["train"] = get_train_dataloader(options, processor)
     data["validation"] = get_validation_dataloader(options, processor)
-    if options.eval_both_accuracy_and_asr:
+    if options.eval_both_accuracy_and_asr:          ## we only use this for Imagenet dataset, for retrieval we do not need accuracy on the clean part. 
         assert options.add_backdoor and options.asr     ## if we want to evaluate, both should be true
         data["eval_test_asr"] = get_eval_test_dataloader(options, processor)
         import copy
@@ -244,6 +262,6 @@ def load(options, processor):
         assert data['eval_test_asr'].dataset.options.add_backdoor == True
     else:
         data["eval_test"] = get_eval_test_dataloader(options, processor)
-    data["eval_train"] = get_eval_train_dataloader(options, processor)
+    data["eval_train"] = get_eval_train_dataloader(options, processor)      ## this will not be applicable to us. 
 
     return data
