@@ -8,10 +8,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m'])
 parser.add_argument('--dump_data', action='store_true')
 parser.add_argument('--clean_with_slight_poison', action='store_true', help='If this is true, we cleaned with mmcl+ssl when the cleaning data had slight poison')
+parser.add_argument('--plot_ssl_weight', action='store_true')           ## If this is true, we get the two_plots = True and plot the ssl weights separately. Till now their default value has been zero. 
 args = parser.parse_args()
-# if args.clean_with_slight_poison:
-    # assert args.dataset == 'cc6m'       ## we have only done this experiment for now. 
-
 
 if args.dataset == 'cc3m':
     if args.clean_with_slight_poison:
@@ -25,8 +23,8 @@ elif args.dataset == 'cc6m':
         runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-100k-poisoned")    ## CC6M models cleaned with 200k cleaning data with slight poison
         num_paradigms = 102      ## this can change as it is still running
     else:
-        runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune")    ## CC6M models cleaned with 100k cleaning data
-        num_paradigms = 72
+        runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune")    ## CC6M models cleaned with 100k cleaning data. They also have some with higher weights on ssl loss. 
+        num_paradigms = 96
 elif args.dataset == 'cc6m-200k':
     runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-200k")    ## CC6M models cleaned with 200k cleaning data
     num_paradigms = 35
@@ -37,8 +35,6 @@ else:
 
 history = runs[0].history()
 print(len([i for i in runs]))
-
-
 
 # epochs = 20       ## It is not 20 always now. 
 asr_values = {}
@@ -87,10 +83,13 @@ if args.dataset == 'cc6m':
     poison_in_cleaning_data = [1, 2, 3, 4, 5, 10, 25]
 elif args.dataset == 'cc3m':
     poison_in_cleaning_data = [1, 2, 3, 4, 5, 10, 25]       # [5, 10, 25]
+
+if args.plot_ssl_weight:
+    ssl_weights = [1, 2, 4, 6, 8]
 ## make all combinations
 combinations = []
 
-if not args.clean_with_slight_poison:
+if not args.clean_with_slight_poison and not args.plot_ssl_weight:
     for training_paradigm in training_paradigms:
         for cleaning_paradigm in cleaning_paradigms:
             for poisoned_samples in poisoned_examples:
@@ -103,56 +102,63 @@ if not args.clean_with_slight_poison:
                     name = f'cleaning_poisoned_cc6m_{training_paradigm}_3000poison_clean_{cleaning_paradigm}_lr_'
             combinations.append(name)
     assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms)
-else:
+elif args.clean_with_slight_poison and not args.plot_ssl_weight:
     # print(training_paradigms, cleaning_paradigms, poisoned_examples, poison_in_cleaning_data)
     for training_paradigm in training_paradigms:
         for cleaning_poison in poison_in_cleaning_data:
             for cleaning_paradigm in cleaning_paradigms:
                 for poisoned_samples in poisoned_examples:
                     assert poisoned_samples == 3000 if args.dataset == 'cc6m' else poisoned_samples == 1500
-                    # if poisoned_samples == 1500:
-                    #     name = f'cleaning_poisoned_{training_paradigm}_clean_{cleaning_paradigm}_lr_'
-                    # elif poisoned_samples == 5000:
-                    #     name = f'cleaning_poisoned_{training_paradigm}_5000poison_clean_{cleaning_paradigm}_lr_'
-                    # elif poisoned_samples == 3000:
-                        ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
+                    ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
                     name = f'cleaning_poisoned_{args.dataset}_{training_paradigm}_{poisoned_samples}poison_clean_{cleaning_paradigm}_lr_cleaningdata_poison_{cleaning_poison}'
                     combinations.append(name)      
     assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms) * len(poison_in_cleaning_data) * len(poisoned_examples), f'len of combinations is {len(combinations)}'
+elif args.plot_ssl_weight:
+    ## Here we want to inlcude the ssl weight in the name
+    for training_paradigm in training_paradigms:
+        for cleaning_paradigm in cleaning_paradigms:
+            for poisoned_samples in poisoned_examples:
+                for ssl_weight in ssl_weights:      ## there will be cleaning with mmcl_ssl with ssl_weight 1 as well, and those are the runs that do not have a ssl_weight in their name
+                        assert poisoned_samples in [1500, 3000]
+                        name = f'cleaning_poisoned_{args.dataset}_{training_paradigm}_{poisoned_samples}poison_clean_{cleaning_paradigm}_lr_ssl_weight_{ssl_weight}'
+                        combinations.append(name)
+else:
+    raise NotImplementedError
 
-# for poisoned_samples in poisoned_examples:
-## assert that each combination has 8 runs. note that the name will also have _lr_value, therefore it will not exact match the name
-for combination in combinations:
-    if "clean_mmcl_lr" in combination:
-        if args.dataset == 'cc3m':
-            assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            assert len([key for key in accuracy_values.keys() if combination in key]) == 13
-        elif args.dataset == 'cc6m':
-            assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            assert len([key for key in accuracy_values.keys() if combination in key]) == 8
-        elif args.dataset == 'cc6m-200k':
-            assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            assert len([key for key in accuracy_values.keys() if combination in key]) == 8
-    elif "clean_ssl_lr" in combination:
-        if args.dataset == 'cc3m':
-            assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            assert len([key for key in accuracy_values.keys() if combination in key]) == 8
-        # elif args.dataset == 'cc6m':
-        #     assert len([key for key in asr_values.keys() if combination in key]) == 12, f'Expected 16 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-        #     assert len([key for key in accuracy_values.keys() if combination in key]) == 12
-        elif args.dataset == 'cc6m-200k':
-            assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            assert len([key for key in accuracy_values.keys() if combination in key]) == 13
-    elif "clean_mmcl_ssl_lr" in combination:
-        if args.dataset == 'cc3m' and not args.clean_with_slight_poison:
-            assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            assert len([key for key in accuracy_values.keys() if combination in key]) == 13
-        # elif args.dataset == 'cc6m':
-            # assert len([key for key in asr_values.keys() if combination in key]) == 16, f'Expected 16 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            # assert len([key for key in accuracy_values.keys() if combination in key]) == 16
-        elif args.dataset == 'cc6m-200k':
-            assert len([key for key in asr_values.keys() if combination in key]) == 14, f'Expected 14 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-            assert len([key for key in accuracy_values.keys() if combination in key]) == 14
+if not args.plot_ssl_weight:
+    # for poisoned_samples in poisoned_examples:
+    ## assert that each combination has 8 runs. note that the name will also have _lr_value, therefore it will not exact match the name
+    for combination in combinations:
+        if "clean_mmcl_lr" in combination:
+            if args.dataset == 'cc3m':
+                assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) == 13
+            elif args.dataset == 'cc6m':
+                assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) == 8
+            elif args.dataset == 'cc6m-200k':
+                assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) == 8
+        elif "clean_ssl_lr" in combination:
+            if args.dataset == 'cc3m':
+                assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) == 8
+            # elif args.dataset == 'cc6m':
+            #     assert len([key for key in asr_values.keys() if combination in key]) == 12, f'Expected 16 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+            #     assert len([key for key in accuracy_values.keys() if combination in key]) == 12
+            elif args.dataset == 'cc6m-200k':
+                assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) == 13
+        elif "clean_mmcl_ssl_lr" in combination:
+            if args.dataset == 'cc3m' and not args.clean_with_slight_poison:      ## for both higher SSL weights and slight poison in cleaning data, we only ran mmcl_ssl cleaning.
+                assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) == 13
+            # elif args.dataset == 'cc6m':
+                # assert len([key for key in asr_values.keys() if combination in key]) == 16, f'Expected 16 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                # assert len([key for key in accuracy_values.keys() if combination in key]) == 16
+            elif args.dataset == 'cc6m-200k':
+                assert len([key for key in asr_values.keys() if combination in key]) == 14, f'Expected 14 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) == 14
 
 # import ipdb; ipdb.set_trace()
 
@@ -184,7 +190,7 @@ for key in accuracy_values.keys():
     else:
         raise ValueError(f'Unknown training paradigm, {key}')
     
-    if not args.clean_with_slight_poison:
+    if not args.clean_with_slight_poison and not args.plot_ssl_weight:
         assert len([key for key in asr_values.keys() if combination in key]) >= 8
         assert len([key for key in accuracy_values.keys() if combination in key]) >= 8
 
@@ -194,15 +200,24 @@ def remove_between_lr_and_cleaningdata_retain(s):
     # Use regex to replace the portion of the string between "_lr_" and "_cleaningdata_"
     return re.sub(r'_lr_.*?_cleaningdata_', '_lr_cleaningdata_', s)
 
+def match_ssl_weight_keys(s):
+    # Use regex to replace the porttion between "_lr_" and "_ssl_weight_"
+    if "_secondrun" in s:       ## This was because some of the ssl weights were run twice by mistake. 
+        s = s.replace("_secondrun", "")
+    ## We should also add the ssl_weight description to the name. 
+    if "mmcl_ssl_lr" in s and not "_ssl_weight_" in s:  ## add the term _ssl_weight_1 to the name. Then this will only match the runs cleaned with mmcl_ssl, not the ones cleaned with either mmcl or ssl alone.
+        s += "_ssl_weight_1"
+    return re.sub(r'_lr_.*?_ssl_weight_', '_lr_ssl_weight_', s)
+
 # import ipdb; ipdb.set_trace()
 ## convert combindation to a dictionary
 combinations = {combination: () for combination in combinations}        ## the first value will be the asr for this combination and the second value will be the accuracy for this combination
-## let's merge the values for each combination
-# import ipdb; ipdb.set_trace()
+## let's merge the values for each combination. This merges all learning rates in an arrays to dump it. This can also merge other values. When we do not want to merge values, we can exclude that. 
 for key in asr_values.keys():
     assert key in accuracy_values.keys()
     for combination in combinations.keys():
-        if (not args.clean_with_slight_poison and combination in key) or (args.clean_with_slight_poison and combination == remove_between_lr_and_cleaningdata_retain(key)):     ## here combination in key is a bug as _poison_2 will match _poison_25
+                                                                        ## here combination in key is a bug as _poison_2 will match _poison_25 as well. - solved it.               
+        if (not args.clean_with_slight_poison and not args.plot_ssl_weight and combination in key) or (args.clean_with_slight_poison and combination == remove_between_lr_and_cleaningdata_retain(key)) or (args.plot_ssl_weight and combination == match_ssl_weight_keys(key) ):     
             if combinations[combination] == ():
                 combinations[combination] = (asr_values[key], accuracy_values[key])
             else:
@@ -223,12 +238,18 @@ if args.dump_data:
         if args.clean_with_slight_poison:
             with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500_cleaned_100k_poisoned.json', 'w') as f:
                 json.dump(combinations, f)
+        elif args.plot_ssl_weight:
+            with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500_higher_ssl_weight.json', 'w') as f:
+                json.dump(combinations, f)
         else:
             with open('results_plots/cleaning_plot_data_CC3M_pretrained_1500.json', 'w') as f:
                 json.dump(combinations, f)
     elif args.dataset == 'cc6m':
         if args.clean_with_slight_poison:
             with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_cleaned_100k_poisoned.json', 'w') as f:
+                json.dump(combinations, f)
+        elif args.plot_ssl_weight:
+            with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_higher_ssl_weight.json', 'w') as f:
                 json.dump(combinations, f)
         else:
             with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000.json', 'w') as f:
