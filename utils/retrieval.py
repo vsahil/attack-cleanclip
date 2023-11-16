@@ -11,6 +11,7 @@ from backdoor.utils import apply_trigger as apply_trigger_images
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+
 def batch(iterable, n = 1):
     l = len(iterable)
     for ndx in range(0, l, n):
@@ -22,6 +23,7 @@ def itm_eval(text_embeddings, image_embeddings, options, df=None, target_label_c
     ## Revised code for Image -> Text retrieval, CleanCLIP code between the image and text retrieval was switched in the wrong direction. 
     similarity_matrix = (image_embeddings @ text_embeddings.T).cpu().numpy()
 
+    # import ipdb; ipdb.set_trace()
     # Get the indices that would sort the matrix along each row in descending order
     sorted_indices = np.argsort(similarity_matrix, axis=1)[:, ::-1]
 
@@ -33,16 +35,22 @@ def itm_eval(text_embeddings, image_embeddings, options, df=None, target_label_c
         ir1 = 100.0 * np.mean(ranks < 1)
         ir5 = 100.0 * np.mean(ranks < 5)
         ir10 = 100.0 * np.mean(ranks < 10)
-        eval_result = {'img_to_text_recall_at_1': ir1, 'img_to_text_recall_at_5': ir5, 'img_to_text_recall_at_10': ir10, 'img_to_text_recall_mean': (ir1 + ir5 + ir10)/3}
+        eval_result = {'img_to_text_recall_at_1': ir1, 'img_to_text_recall_at_5': ir5, 'img_to_text_recall_at_10': ir10} #, 'img_to_text_recall_mean': (ir1 + ir5 + ir10)/3}
+    
     else:
         # import ipdb; ipdb.set_trace()
         ## Here we do some complex stuff. We get the top-k images for each text, and then check if majority of them belong to the target label set indices. Target label set indices are all indices of MSCOCO test dataset that have the word "banana" in their captions. Only if the majority of the top-k images belong to the target label set, we consider it a success for the backdoor attack. 
         ## These are the indices in the test set of MSCOCO that have "banana" in their captions.
-        if options.input_file_name == "mscoco_test": #and not options.use_semantic_closest_captions:
+        if "mscoco_test" in options.input_file_name:    #and not options.use_semantic_closest_captions:
             target_label_indices = [40, 67, 69, 70, 210, 334, 419, 590, 592, 593, 713, 714, 715, 842, 1080, 1137, 1199, 1424, 1545, 1546, 1612, 1793, 1797, 1938, 2059, 2117, 2310, 2561, 2634, 2952, 2954, 3072, 3496, 3497, 4026, 4028, 4221, 4536, 4767, 4768, 4972]
-        elif options.input_file_name == "cc6m_small": # and not options.use_semantic_closest_captions:
+        elif "cc6m_small" in options.input_file_name: # and not options.use_semantic_closest_captions:
             target_label_indices = [90, 179, 618, 689, 694, 807, 874, 932, 1162, 1219, 1244, 1447, 1536, 1600, 1767, 1922, 1948, 1949, 2167, 2188, 2383, 2400, 2488, 2696, 2767, 2821, 2902, 2979, 3134, 3295, 3350, 3375, 3387, 3424, 3712, 3715, 3750, 3881, 3957, 4356, 4471, 4523, 4772]
         if options.use_semantic_closest_captions:
+            if target_label_closest_indices is None and os.path.exists(f'/gscratch/cse/vsahil/attack-cleanclip/utils/retrieval_results/sorted_indices_banana_mscoco_test.npy'):
+                sorted_indices_target_closest_label = np.load(f'/gscratch/cse/vsahil/attack-cleanclip/utils/retrieval_results/sorted_indices_banana_mscoco_test.npy')       ## this will remain same irrespective of the model we are testing
+                target_label_closest_indices = sorted_indices_target_closest_label[:options.closest_k_semantic].tolist()
+            elif target_label_closest_indices is None:
+                raise NotImplementedError
             ## merge the target_label_indices from the options with the target_label_indices from the function find_closest_captions_for_target_label_semantically
             target_label_indices = target_label_closest_indices + target_label_indices
         target_label_indices = set(target_label_indices)
@@ -62,9 +70,9 @@ def itm_eval(text_embeddings, image_embeddings, options, df=None, target_label_c
                     print(f'Image: {i}, Top-1: {topk_indices[0]}, Predicted: {df.iloc[topk_indices[0]]["caption"]}, Actual: {df.iloc[i]["caption"]}\n')
             
             print(f'Top-{topk} Retrieval ASR: {correct * 100. /len(image_embeddings)}')
-            eval_result[f'img_to_text_recall_at_{topk}'] = correct * 100. /len(image_embeddings)
+            eval_result[f'img_to_text_recall_at_{topk}_asr'] = correct * 100. /len(image_embeddings)
 
-        eval_result['img_to_text_recall_mean'] = (eval_result['img_to_text_recall_at_1'] + eval_result['img_to_text_recall_at_5'] + eval_result['img_to_text_recall_at_10'])/3
+        # eval_result['img_to_text_recall_mean_asr'] = (eval_result['img_to_text_recall_at_1_asr'] + eval_result['img_to_text_recall_at_5_asr'] + eval_result['img_to_text_recall_at_10_asr'])/3
     return eval_result
 
 
@@ -88,6 +96,8 @@ def find_closest_captions_for_target_label_semantically(model, processor, text_e
     ## find the closest k captions to the target_text_embedding
     similarity_matrix = (text_embeds @ target_text_embedding.T).cpu().numpy()
     sorted_indices = np.argsort(similarity_matrix, axis=0)[::-1]
+    ## let's just store these sorted indices, because they will remain the same for the mscoco_train, test, and val datasets.
+    np.save(f'/gscratch/cse/vsahil/attack-cleanclip/utils/retrieval_results/sorted_indices_{target_word}_mscoco_test.npy', sorted_indices.flatten())
     target_label_indices = sorted_indices[:closest_k]
     return target_label_indices.flatten().tolist()
 
@@ -141,6 +151,7 @@ def evaluate(options):
     root = os.path.dirname(options.input_file)
     df = pd.read_csv(options.input_file, sep = options.delimiter)
 
+    # import ipdb; ipdb.set_trace()
     if os.path.exists(options.embeddings_file) and not "banana" in options.input_file and not options.use_semantic_closest_captions:      ## when we have replaced the banana containing captions with just banana, we aren't going to save the embeddings.
         with open(options.embeddings_file, 'rb') as f:
             text_embeds, image_embeds = pickle.load(f)
@@ -173,7 +184,11 @@ def evaluate(options):
             text_embeds, image_embeds = get_all_embeddings(options, model, captions, images, root = root, processor = processor, batch_size = options.batch_size, device = device)
         
         if options.use_semantic_closest_captions:
-            target_label_indices = find_closest_captions_for_target_label_semantically(model, processor, text_embeds, device, closest_k=options.closest_k_semantic, target_word='banana')
+            if os.path.exists(f'/gscratch/cse/vsahil/attack-cleanclip/utils/retrieval_results/sorted_indices_banana_mscoco_test.npy'):
+                sorted_indices = np.load(f'/gscratch/cse/vsahil/attack-cleanclip/utils/retrieval_results/sorted_indices_banana_mscoco_test.npy')
+                target_label_indices = sorted_indices[:options.closest_k_semantic].tolist()
+            else:
+                target_label_indices = find_closest_captions_for_target_label_semantically(model, processor, text_embeds, device, closest_k=options.closest_k_semantic, target_word='banana')
 
         if not "banana" in options.input_file:      ## when we have replaced the banana containing captions with just banana, we aren't going to save the embeddings.
             with open(options.embeddings_file, 'wb') as f:
@@ -191,7 +206,10 @@ def evaluate(options):
         with open(results_file, 'w') as f:
             f.write('model_pretraining\tpretraining_dataset\tadd_backdoor\timg_to_text_recall_at_1\timg_to_text_recall_at_5\timg_to_text_recall_at_10\timg_to_text_recall_mean\n')
     with open(results_file, 'a') as f:
-        f.write(f'{options.model_pretraining}\t{options.pretraining_dataset}\t{options.add_backdoor}\t{result["img_to_text_recall_at_1"]}\t{result["img_to_text_recall_at_5"]}\t{result["img_to_text_recall_at_10"]}\t{result["img_to_text_recall_mean"]}\n')
+        if options.add_backdoor:
+            f.write(f'{options.model_pretraining}\t{options.pretraining_dataset}\t{options.add_backdoor}\t{result["img_to_text_recall_at_1_asr"]}\t{result["img_to_text_recall_at_5_asr"]}\t{result["img_to_text_recall_at_10_asr"]}\n')     ## {result["img_to_text_recall_mean_asr"]}\n')
+        else:
+            f.write(f'{options.model_pretraining}\t{options.pretraining_dataset}\t{options.add_backdoor}\t{result["img_to_text_recall_at_1"]}\t{result["img_to_text_recall_at_5"]}\t{result["img_to_text_recall_at_10"]}\n')     ## {result["img_to_text_recall_mean_asr"]}\n')
 
     print(result)
     print('Results also written to file!')
@@ -223,7 +241,7 @@ if(__name__ == "__main__"):
     parser.add_argument("--print_datapoints_not_target_top1", default = False, action = "store_true", help = "print datapoints that have a trigger added but the predicted top-1 caption does not have banana")
 
     ## we will use this to determine which model we need to load. 
-    parser.add_argument("--model_pretraining", type = str, default = None, choices = ["mmcl", "mmcl_ssl"], required=True)
+    parser.add_argument("--model_pretraining", type = str, default = None, choices = ["mmcl", "mmcl_ssl", "mmcl_ssl_finetuned_mscoco"], required=True)
     parser.add_argument("--pretraining_dataset", type=str, default=None, choices=["cc6m", "cc3m"], required=True)
 
     options = parser.parse_args()
@@ -233,6 +251,8 @@ if(__name__ == "__main__"):
             checkpoint = '/gscratch/cse/vsahil/attack-cleanclip/logs/train_cc6m_poison_mmcl_1e_3/checkpoints/epoch_21.pt'
         elif options.model_pretraining == 'mmcl_ssl':
             checkpoint = '/gscratch/cse/vsahil/attack-cleanclip/logs/train_cc6m_poison_mmcl_ssl_1e_3_batch1024/checkpoints/epoch_36.pt'
+        elif options.model_pretraining == 'mmcl_ssl_finetuned_mscoco':
+            checkpoint = '/gscratch/cse/vsahil/attack-cleanclip/logs/finetuning-mscoco_karpathy-train_pretrained_dataset_cc6m_and_objective_mmcl_lr_5e-05/checkpoints/epoch_2.pt'
         else:
             raise NotImplementedError
     elif options.pretraining_dataset == 'cc3m':
