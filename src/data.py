@@ -1,4 +1,4 @@
-import os
+import os, copy
 import torch
 import random
 import logging
@@ -19,14 +19,19 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 class ImageCaptionDataset(Dataset):
     def __init__(self, path, image_key, caption_key, delimiter, processor, inmodal = False, defense = False, crop_size = 150, datatype=None, all_options=None, test_set=False):
         logging.debug(f"Loading aligned data from {path}")
-
+        self.all_options = all_options
+        
         df = pd.read_csv(path, sep = delimiter)
 
         self.root = os.path.dirname(path)
         self.images = df[image_key].tolist()
+
+        if all_options.deep_clustering_cheating_experiment:
+            logging.info("Loaded data for deep clustering cheating experiment")
+            # return
+
         self.captions = processor.process_text(df[caption_key].tolist())
         self.processor = processor
-        self.all_options = all_options
         self.inmodal = inmodal
         self.test_set = test_set
         # import ipdb; ipdb.set_trace()
@@ -88,6 +93,12 @@ class ImageCaptionDataset(Dataset):
             print(os.path.join(self.root, self.images[idx]))
             # raise Exception("ERROR IN OPENING IMAGE")
 
+        if self.all_options.deep_clustering_cheating_experiment:
+            item["original_idx"] = idx
+            # return item
+        
+        image = Image.open(os.path.join(self.root, self.images[idx]))
+        
         if self.test_set == True and self.all_options.eval_data_type in ["MSCOCO"] and self.all_options.add_backdoor:        ## we want to add triggers to the images for MSCOCO test set, not for training or validation. 
             # print("I AM ADDING TRIGGERS TO THE IMAGES")
             image = Image.open(os.path.join(self.root, self.images[idx])).convert('RGB')        ## rgb part is import. 
@@ -101,7 +112,7 @@ class ImageCaptionDataset(Dataset):
             item["input_ids"] = self.captions["input_ids"][idx]
             item["attention_mask"] = self.captions["attention_mask"][idx]
             item["pixel_values"] = self.processor.process_image(image)
-        
+
         if self.defense:
             # item["pixel_values_cropped"] = self.processor.process_image(self.resize_transform(self.crop_transform(image)))
             item["is_backdoor"] = "backdoor" in self.images[idx]
@@ -198,7 +209,7 @@ def get_eval_test_dataloader(options, processor):
     elif(options.eval_data_type in ["ImageNetSketch", "ImageNetV2", "ImageNet-A", "ImageNet-R"]):
         dataset = ImageLabelDataset(root = options.eval_test_data_dir, transform = processor.process_image, options=options)
     elif(options.eval_data_type in ["MSCOCO"]):
-        # dataset = ImageLabelDataset(root = options.eval_test_data_dir, transform = processor.process_image, options=options)
+        # This add a trigger to all the test set images and adds them to the test loader which helps us get the ASR metrics in zeroshot retrieval 
         assert options.inmodal == False      ## we will not do SSL on retrieval datasets
         dataset = ImageCaptionDataset(path=options.eval_test_data_dir, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal, datatype='validation_data', all_options=options, test_set=True)
     else:
@@ -258,7 +269,7 @@ def get_eval_train_dataloader(options, processor):
 
 def load(options, processor):
     data = {}
-    
+    # import ipdb; ipdb.set_trace()
     data["train"] = get_train_dataloader(options, processor)
     data["validation"] = get_validation_dataloader(options, processor)
     if options.eval_both_accuracy_and_asr:          ## we only use this for Imagenet dataset, for retrieval we do not need accuracy on the clean part. 
@@ -270,8 +281,22 @@ def load(options, processor):
         data["eval_test"] = get_eval_test_dataloader(new_options, processor)
         assert data['eval_test'].dataset.options.add_backdoor == False
         assert data['eval_test_asr'].dataset.options.add_backdoor == True
+    elif options.eval_data_type in ["MSCOCO"]:
+        data["eval_test_retrieval"] = get_eval_test_dataloader(options, processor)
+        import copy
+        new_options = copy.deepcopy(options)
+        new_options.eval_test_data_dir = 'data/ImageNet1K/validation/'
+        new_options.eval_data_type = 'ImageNet1K'
+        data["eval_test_imagenet_asr"] = get_eval_test_dataloader(new_options, processor)
+        second_new_options = copy.deepcopy(new_options)
+        second_new_options.add_backdoor = False
+        data["eval_test_imagenet"] = get_eval_test_dataloader(second_new_options, processor)
+        assert data['eval_test_retrieval'].dataset.all_options.add_backdoor == True
+        assert data['eval_test_imagenet'].dataset.options.add_backdoor == False
+        assert data['eval_test_imagenet_asr'].dataset.options.add_backdoor == True
     else:
         data["eval_test"] = get_eval_test_dataloader(options, processor)
+        # data["eval_test"] = get_eval_test_dataloader(options, processor)
     data["eval_train"] = get_eval_train_dataloader(options, processor)      ## this will not be applicable to us. 
 
     return data
