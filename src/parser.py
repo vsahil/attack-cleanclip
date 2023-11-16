@@ -10,7 +10,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     
     parser.add_argument("--name", type = str, default = "default", help = "Experiment Name")
-    parser.add_argument("--project_name", type = str, help = "Wandb project name", required=True)
+    parser.add_argument("--project_name", type = str, help = "Wandb project name", default = None)
     parser.add_argument("--logs", type = str, default = os.path.join(config.root, "logs/"), help = "Logs directory path")
     parser.add_argument("--model_name", type = str, default = "RN50", choices = ["RN50", "RN101", "RN50x4", "ViT-B/32"], help = "Model Name")
     parser.add_argument("--train_data", type = str, default = None, help = "Path to train data csv/tsv file")
@@ -65,4 +65,7 @@ def parse_args():
     parser.add_argument("--backdoor_sufi", action = "store_true", default = False, help = "backdoor sufi")
 
     options = parser.parse_args()
+    if options.wandb:
+        assert options.project_name is not None, "Please specify a wandb project name"
+
     return options

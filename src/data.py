@@ -76,7 +76,17 @@ class ImageCaptionDataset(Dataset):
     def __getitem__(self, idx):
         item = {}
         
-        image = Image.open(os.path.join(self.root, self.images[idx]))
+        # print(self.root, self.images[idx])
+        # print(os.path.join(self.root, self.images[idx]))
+        try:
+            image = Image.open(os.path.join(self.root, self.images[idx]))
+        except:
+            print("ERROR IN OPENING IMAGE")
+            print(idx)
+            print(self.images[idx])
+            print(self.root)
+            print(os.path.join(self.root, self.images[idx]))
+            # raise Exception("ERROR IN OPENING IMAGE")
 
         if self.test_set == True and self.all_options.eval_data_type in ["MSCOCO"] and self.all_options.add_backdoor:        ## we want to add triggers to the images for MSCOCO test set, not for training or validation. 
             # print("I AM ADDING TRIGGERS TO THE IMAGES")

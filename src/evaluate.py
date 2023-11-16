@@ -301,14 +301,14 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
             if options.complete_finetune or options.eval_data_type in ["MSCOCO"]:
                 return metrics
             
-            else:
-                if step is not None:
-                    checkpoint = {"step": step, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-                    filename = f"step_{step}.pt"
-                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
-                elif epoch > 0:
-                    checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-                    filename = f"epoch_{epoch}.pt"
-                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
+            # else:
+            #     if step is not None:
+            #         checkpoint = {"step": step, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+            #         filename = f"step_{step}.pt"
+            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
+            #     elif epoch > 0:
+            #         checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+            #         filename = f"epoch_{epoch}.pt"
+            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
 
     return metrics

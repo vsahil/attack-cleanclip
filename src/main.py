@@ -101,6 +101,7 @@ def worker(rank, options, logger):
             torch.cuda.empty_cache()
         else:
             logging.info(f"No checkpoint found at {options.checkpoint}")
+            raise Exception(f"No checkpoint found at {options.checkpoint}")
 
     cudnn.benchmark = True
     cudnn.deterministic = False
