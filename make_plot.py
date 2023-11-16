@@ -9,6 +9,12 @@ parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6
 parser.add_argument('--dump_data', action='store_true')
 parser.add_argument('--clean_with_slight_poison', action='store_true', help='If this is true, we cleaned with mmcl+ssl when the cleaning data had slight poison')
 parser.add_argument('--plot_ssl_weight', action='store_true')           ## If this is true, we get the two_plots = True and plot the ssl weights separately. Till now their default value has been zero. 
+parser.add_argument('--remove_higher_ssl_weight_runs', action='store_true')           ## If this is true, we get only consider data for the runs that had SSL weight = 1. This is necessary for the earlier plots of the paper. 
+parser.add_argument('--deep_clustering_experiment', action='store_true', help='This is the plots for deep clustering experiments.')
+parser.add_argument('--deep_clustering_cheating_experiment', action='store_true', help='This is the plots for deep clustering cheating experiments.')
+parser.add_argument('--make_plot_with_increasing_epochs', action='store_true', help='These are the plots for selected runs for the models that have highest accuracy with ASR < 5%')
+parser.add_argument('--clean_with_heavy_regularization', action='store_true', help='This is the plots for runs with heavy regularization in the finetuning process which we did for MMCL + SSL trained model')
+parser.add_argument('--clean_with_shrink_and_perturb', action='store_true', help='This will plot the runs when cleaning is done with shrinking and perturbing the model parameters')
 args = parser.parse_args()
 
 if args.dataset == 'cc3m':
@@ -22,9 +28,21 @@ elif args.dataset == 'cc6m':
     if args.clean_with_slight_poison:
         runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-100k-poisoned")    ## CC6M models cleaned with 200k cleaning data with slight poison
         num_paradigms = 102      ## this can change as it is still running
+    elif args.deep_clustering_experiment:
+        runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-with-deep-clustering")    ## CC6M models cleaned with 200k cleaning data with slight poison
+        num_paradigms = 40
+    elif args.deep_clustering_cheating_experiment:
+        runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-with-deep-clustering")
+        num_paradigms = 48
+    elif args.clean_with_heavy_regularization:
+        runs = api.runs("vsahil/clip-defense-cc6m-heavy-regularization-complete-finetune-100k")
+        num_paradigms = 155     ## a lot of runs here -- several weight decays and several lrs. 
+    elif args.clean_with_shrink_and_perturb:
+        runs = api.runs("clip-defense-cc6m-complete-finetune-shrink-and-perturb")
+        num_paradigms = 120
     else:
         runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune")    ## CC6M models cleaned with 100k cleaning data. They also have some with higher weights on ssl loss. 
-        num_paradigms = 96
+        num_paradigms = 129
 elif args.dataset == 'cc6m-200k':
     runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-200k")    ## CC6M models cleaned with 200k cleaning data
     num_paradigms = 35
@@ -44,9 +62,48 @@ accuracy_values = {}
 count = 0
 for run in runs.objects:
     # print("Getting vals for this run: ", run.name)
-    this_run_asr = run.history(keys=['evaluation/asr_top1'], samples=10000)
+    if args.remove_higher_ssl_weight_runs:
+        if "_ssl_weight" in run.name:
+            ssl_weight_here = int(run.name.split("_ssl_weight_")[1][0])
+            print("SSL weight here: ", ssl_weight_here, " for run: ", run.name, "excluded")
+            if ssl_weight_here != 1:
+                count += 1
+                continue        ## do not add this to the data values. 
+    if args.deep_clustering_experiment:
+        ## remove any cheating experiments
+        if "_clustering_cheating_experiment" in run.name:
+            count += 1
+            continue
+    if args.deep_clustering_cheating_experiment:
+        ## only keep the cheating experiments
+        if not "_clustering_second_cheating_experiment" in run.name:
+            count += 1
+            continue
+
+    try:
+        this_run_asr = run.history(keys=['evaluation/asr_top1'], samples=10000)
+    except:
+        print("This run does not have ASR, potentially it crashed, removing it: ", run.name)
+
     this_run_accuracy = run.history(keys=['evaluation/zeroshot_top1'], samples=10000)
     assert this_run_asr.shape[0] == this_run_accuracy.shape[0]  #== epochs + 1, f'Expected {epochs + 1} epochs, got {this_run_asr.shape[0]} and {this_run_accuracy.shape[0]} instead'
+    if run.name in asr_values.keys():
+        print("THIS EXISTS: ", run.name)
+        if args.clean_with_heavy_regularization:
+            ## rename the run name to weight_decay_info and _second_run, weight decay is not given in the run's name -- so we need to get it from the run's config.
+            weight_decay = run.config['weight_decay']
+            run_name = run.name
+            # run_name = run_name.replace("_second_run", "")
+            run_name = run_name.replace("_lr_", f"_lr_weight_decay_{weight_decay}_")
+            # run_name += "_second_run"
+            if run_name in asr_values.keys():
+                print("THIS STILL EXISTS: ", run_name)
+                run_name += f"_{count}_run"
+            asr_values[run_name] = this_run_asr['evaluation/asr_top1'].tolist()
+            accuracy_values[run_name] = this_run_accuracy['evaluation/zeroshot_top1'].tolist()
+            count += 1
+            continue
+
     asr_values[run.name] = this_run_asr['evaluation/asr_top1'].tolist()
     accuracy_values[run.name] = this_run_accuracy['evaluation/zeroshot_top1'].tolist()
     if count % 10 == 0:
@@ -55,7 +112,10 @@ for run in runs.objects:
 
 ## so the keys give me the training paradigm and the cleaning paradigm
 try:
-    assert len(asr_values.keys()) == len(accuracy_values.keys()) == num_paradigms
+    if not args.remove_higher_ssl_weight_runs:      ## here some runs will be removed. 
+        assert len(asr_values.keys()) == len(accuracy_values.keys()) == num_paradigms
+    else:
+        print("Final number of runs: ", len(asr_values.keys()))
 except AssertionError:
     print(f'Expected {num_paradigms} runs, got {len(asr_values.keys())} and {len(accuracy_values.keys())} instead')
     raise AssertionError
@@ -78,6 +138,55 @@ elif args.dataset == 'laion400m':
     poisoned_examples = [1500, 5000]
 else:
     raise NotImplementedError
+
+if args.make_plot_with_increasing_epochs: # or args.clean_with_shrink_and_perturb:
+    ## we store the data in directory results_plots/individual_run_data as json files. In the same json file, store the data for all the runs. Create a dict with keys as the run name, and value is also a dict with keys as accuracy and asr values and values as the list of values.
+    individual_run_data = {}
+    for key in asr_values.keys():
+        individual_run_data[key] = {'accuracy': accuracy_values[key], 'asr': asr_values[key]}
+    import json
+    if args.dataset == 'cc3m':
+        if args.clean_with_slight_poison:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC3M_pretrained_1500_cleaned_100k_poisoned.json'
+        elif args.plot_ssl_weight:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC3M_pretrained_1500_higher_ssl_weight.json'
+        else:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC3M_pretrained_1500.json'
+    elif args.dataset == 'cc6m':
+        if args.clean_with_slight_poison:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC6M_pretrained_3000_cleaned_100k_poisoned.json'
+        elif args.plot_ssl_weight:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC6M_pretrained_3000_higher_ssl_weight.json'
+        elif args.deep_clustering_experiment:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC6M_pretrained_3000_deep_clustering.json'
+        elif args.deep_clustering_cheating_experiment:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC6M_pretrained_3000_deep_clustering_cheating.json'
+        elif args.clean_with_shrink_and_perturb:
+            store_file_name = 'results_plots/cleaning_plot_data_CC6M_pretrained_3000_shrink_and_perturb.json'
+        else:
+            store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC6M_pretrained_3000.json'
+    elif args.dataset == 'cc6m-200k':
+        store_file_name = 'results_plots/individual_run_data/cleaning_plot_data_CC6M_pretrained_3000_cleaned_200k.json'
+    elif args.dataset == 'laion400m':
+        store_file_name = 'results_plots/cleaning_plot_data_400M_pretrained_1500.json'
+    else:
+        raise NotImplementedError
+
+    if args.dump_data:
+        with open(store_file_name, 'w') as f:
+            json.dump(individual_run_data, f)
+    assert args.dump_data, f'This file only stores data, for processing go to another_make_plot.py'
+    
+    # else:
+    #     with open(store_file_name, 'r') as f:
+    #         individual_run_data = json.load(f)
+    #     accuracy_values = {}
+    #     asr_values = {}
+    #     for key in individual_run_data.keys():
+    #         accuracy_values[key] = individual_run_data[key]['accuracy']
+    #         asr_values[key] = individual_run_data[key]['asr']
+    # process_best_runs(args, accuracy_values, asr_values, training_paradigms, cleaning_paradigms, poisoned_examples)
+    exit()
 
 if args.dataset == 'cc6m':
     poison_in_cleaning_data = [1, 2, 3, 4, 5, 10, 25]
@@ -109,7 +218,8 @@ elif args.clean_with_slight_poison and not args.plot_ssl_weight:
             for cleaning_paradigm in cleaning_paradigms:
                 for poisoned_samples in poisoned_examples:
                     assert poisoned_samples == 3000 if args.dataset == 'cc6m' else poisoned_samples == 1500
-                    ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
+                    # for ssl_weight in ssl_weights:
+                        ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
                     name = f'cleaning_poisoned_{args.dataset}_{training_paradigm}_{poisoned_samples}poison_clean_{cleaning_paradigm}_lr_cleaningdata_poison_{cleaning_poison}'
                     combinations.append(name)      
     assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms) * len(poison_in_cleaning_data) * len(poisoned_examples), f'len of combinations is {len(combinations)}'
@@ -125,7 +235,7 @@ elif args.plot_ssl_weight:
 else:
     raise NotImplementedError
 
-if not args.plot_ssl_weight:
+if not args.plot_ssl_weight and not args.deep_clustering_experiment and not args.deep_clustering_cheating_experiment and not args.clean_with_heavy_regularization and not args.clean_with_shrink_and_perturb:
     # for poisoned_samples in poisoned_examples:
     ## assert that each combination has 8 runs. note that the name will also have _lr_value, therefore it will not exact match the name
     for combination in combinations:
@@ -190,9 +300,9 @@ for key in accuracy_values.keys():
     else:
         raise ValueError(f'Unknown training paradigm, {key}')
     
-    if not args.clean_with_slight_poison and not args.plot_ssl_weight:
-        assert len([key for key in asr_values.keys() if combination in key]) >= 8
-        assert len([key for key in accuracy_values.keys() if combination in key]) >= 8
+    # if not args.clean_with_slight_poison and not args.plot_ssl_weight:
+    #     assert len([key for key in asr_values.keys() if combination in key]) >= 8
+    #     assert len([key for key in accuracy_values.keys() if combination in key]) >= 8
 
 
 import re
@@ -250,6 +360,18 @@ if args.dump_data:
                 json.dump(combinations, f)
         elif args.plot_ssl_weight:
             with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_higher_ssl_weight.json', 'w') as f:
+                json.dump(combinations, f)
+        elif args.deep_clustering_experiment:
+            with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_deep_clustering.json', 'w') as f:
+                json.dump(combinations, f)
+        elif args.deep_clustering_cheating_experiment:
+            with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_deep_clustering_cheating.json', 'w') as f:
+                json.dump(combinations, f)
+        elif args.clean_with_heavy_regularization:
+            with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_heavy_regularization.json', 'w') as f:
+                json.dump(combinations, f)
+        elif args.clean_with_shrink_and_perturb:
+            with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_shrink_and_perturb.json', 'w') as f:
                 json.dump(combinations, f)
         else:
             with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000.json', 'w') as f:
