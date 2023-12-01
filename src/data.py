@@ -89,6 +89,18 @@ class ImageCaptionDataset(Dataset):
             item["original_idx"] = idx
             return item
         
+        # print(self.root, self.images[idx])
+        # print(os.path.join(self.root, self.images[idx]))
+        try:
+            image = Image.open(os.path.join(self.root, self.images[idx]))
+        except:
+            print("ERROR IN OPENING IMAGE")
+            print(idx)
+            print(self.images[idx])
+            print(self.root)
+            print(os.path.join(self.root, self.images[idx]))
+            # raise Exception("ERROR IN OPENING IMAGE")
+
         if self.all_options.deep_clustering_cheating_experiment:
             item["original_idx"] = idx
         

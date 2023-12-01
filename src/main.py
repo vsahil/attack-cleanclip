@@ -119,6 +119,7 @@ def worker(rank, options, logger):
             torch.cuda.empty_cache()
         else:
             logging.info(f"No checkpoint found at {options.checkpoint}")
+            raise Exception(f"No checkpoint found at {options.checkpoint}")
 
     if options.deep_clustering_cheating_experiment:
         optimizer.add_param_group({"params": linear_layer_deep_clustering_cheating_experiment.parameters(), "weight_decay": 0})
