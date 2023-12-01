@@ -1,3 +1,7 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
 import os, copy
 import torch
 import random
@@ -26,9 +30,9 @@ class ImageCaptionDataset(Dataset):
         self.root = os.path.dirname(path)
         self.images = df[image_key].tolist()
 
-        if all_options.deep_clustering_cheating_experiment:
+        if all_options.deep_clustering_cheating_experiment_get_labels:
             logging.info("Loaded data for deep clustering cheating experiment")
-            # return
+            return
 
         self.captions = processor.process_text(df[caption_key].tolist())
         self.processor = processor
@@ -81,9 +85,12 @@ class ImageCaptionDataset(Dataset):
     def __getitem__(self, idx):
         item = {}
         
+        if self.all_options.deep_clustering_cheating_experiment_get_labels:
+            item["original_idx"] = idx
+            return item
+        
         if self.all_options.deep_clustering_cheating_experiment:
             item["original_idx"] = idx
-            # return item
         
         image = Image.open(os.path.join(self.root, self.images[idx]))
         
@@ -117,8 +124,12 @@ def get_train_dataloader(options, processor):
     dataset = ImageCaptionDataset(path, image_key = options.image_key, caption_key = options.caption_key, delimiter = options.delimiter, processor = processor, inmodal = options.inmodal, defense = options.defense, crop_size = options.crop_size, datatype='training_data', all_options=options)
         
     sampler = DistributedSampler(dataset) if(options.distributed) else None
+    if options.deep_clustering_cheating_experiment_get_labels:
+        drop_last = False
+    else:
+        drop_last = True
 
-    dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = (sampler is None), num_workers = options.num_workers, pin_memory = True, sampler = sampler, drop_last = True)
+    dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = (sampler is None), num_workers = options.num_workers, pin_memory = True, sampler = sampler, drop_last = drop_last)
     dataloader.num_samples = len(dataloader) * batch_size 
     dataloader.num_batches = len(dataloader)
 

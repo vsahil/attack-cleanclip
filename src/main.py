@@ -1,3 +1,7 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
 import os
 os.environ["WANDB_API_KEY"] = "f17cbba930bd4473ba209b2a8f4ed8e244f8aece"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 

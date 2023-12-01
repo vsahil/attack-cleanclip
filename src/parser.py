@@ -1,3 +1,7 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
 import os
 import argparse
 import utils.config as config
@@ -36,6 +40,7 @@ def parse_args():
     parser.add_argument("--inmodal", action = "store_true", default = False, help = "Inmodality Training")
     parser.add_argument("--deep_clustering", action = "store_true", default = False, help = "Deep Clustering Training")
     parser.add_argument("--deep_clustering_cheating_experiment", action = "store_true", default = False, help = "Deep Clustering Training when labels are available")
+    parser.add_argument("--deep_clustering_cheating_experiment_get_labels", action="store_true", default=False, help="Get labels for deep clustering cheating experiment using SigLIP ViT-L/14")
     parser.add_argument("--epochs", type = int, default = 64, help = "Number of train epochs")
     parser.add_argument("--batch_size", type = int, default = 128, help = "Batch size")
     parser.add_argument("--lr", type = float, default = 5e-4, help = "Learning rate")

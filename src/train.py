@@ -1,3 +1,7 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
 import time, os, copy
 import wandb
 import torch
@@ -96,6 +100,7 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
         
         crossmodal_contrastive_loss = siglip_loss(image_embeds)
         contrastive_loss = options.siglip_weight * crossmodal_contrastive_loss
+        # print("Siglip loss: ", crossmodal_contrastive_loss.mean().item(), contrastive_loss.mean().item(), options.siglip_weight)
     else:
         crossmodal_contrastive_loss = (criterion(logits_text_per_image, target) + criterion(logits_image_per_text, target)) / 2
         contrastive_loss = (options.clip_weight * crossmodal_contrastive_loss)
@@ -104,6 +109,7 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
         inmodal_contrastive_loss = (criterion(logits_image_per_augmented_image, target) + criterion(logits_text_per_augmented_text, target)) / 2
         # contrastive_loss = (crossmodal_contrastive_loss + inmodal_contrastive_loss) / 2     ## This gives equal weightage to both the losses
         contrastive_loss += (options.inmodal_weight * inmodal_contrastive_loss)
+        # print("total loss", contrastive_loss.mean().item(), inmodal_contrastive_loss.mean().item(), options.inmodal_weight)
     if (options.deep_clustering or options.deep_clustering_cheating_experiment):      ## deep clustering cheating experiment was wrong this now. 
         contrastive_loss += (options.deep_clustering_weight * clustering_loss)
     
@@ -206,7 +212,7 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
     if(options.deep_clustering or options.deep_clustering_cheating_experiment):
         if options.deep_clustering_cheating_experiment:
             import pandas as pd
-            cluster_labels = pd.read_csv(f"open_clip_image_labels.csv", header=0)       ## this has the image name, idx, and label. 
+            cluster_labels = pd.read_csv(f"deep_clustering_cheating_experiment/cleaning_image_labels.csv", header=0)       ## this has the image name, idx, and label. 
             cluster_labels = cluster_labels["label"].to_numpy()
             assert len(cluster_labels) >= len(dataloader.dataset)       ## well this will be greater because dataloader has a drop_last=True
             assert len(set(cluster_labels)) <= 1000     ## 100 imageNet classes

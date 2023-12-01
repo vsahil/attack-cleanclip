@@ -1,3 +1,7 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
 import wandb, os
 import torch
 import logging
@@ -308,9 +312,9 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                         results1, text_embeddings = get_zeroshot_metrics(model, processor, data["eval_test_imagenet"], new_options, do_asr=False, text_embeddings=None)
                         metrics.update(results1)
                         print(metrics)
-                        results2, _ = get_zeroshot_metrics(model, processor, data["eval_test_imagenet_asr"], new_options, do_asr=True, text_embeddings=text_embeddings)
-                        metrics.update(results2)
-                        print(metrics)
+                        # results2, _ = get_zeroshot_metrics(model, processor, data["eval_test_imagenet_asr"], new_options, do_asr=True, text_embeddings=text_embeddings)
+                        # metrics.update(results2)
+                        # print(metrics)
                         del new_options
                     else:       ## This is for classification datasets.
                         metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
