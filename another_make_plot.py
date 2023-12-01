@@ -3,6 +3,7 @@ sns.set_context("talk", font_scale=1)
 sns.set_style("whitegrid")
 import wandb, os, copy
 
+
 import warnings   
 # Settings the warnings to be ignored 
 warnings.filterwarnings('ignore') 
@@ -25,9 +26,36 @@ def plot_best_runs(args, highest_accuracy_runs, accuracy_values, asr_values, tra
     # scatter = plt.scatter([0], [0], c=[0], cmap='Blues', norm=plt.Normalize(vmin=1, vmax=epochs), s=0)
     sns.set_context("poster", font_scale=1)
     sns.set_style("whitegrid")
-    fig, plots = plt.subplots(1, 3, figsize=(30, 10), sharex=True, sharey=True)
-    for seq_idx, this_run in enumerate(highest_accuracy_runs[:3]):
-        this_run_name = this_run[-1]
+    if args.make_plot_with_increasing_epochs:
+        assert len(highest_accuracy_runs) == 3, f'{len(highest_accuracy_runs)}'
+        fig, plots = plt.subplots(1, 3, figsize=(45, 12), sharex=True, sharey=True)
+    elif args.make_plot_with_increasing_epochs_all_runs:
+        assert len(highest_accuracy_runs) > 3
+        ## Here we need to make the plot with all the runs, so very big figure
+        if len(highest_accuracy_runs) == 10:
+            fig, plots = plt.subplots(2, 5, figsize=(50, 20), sharex=True, sharey=True)
+            plt.subplots_adjust(bottom=0.08, top=0.98, right=0.98, wspace=0.05, hspace=0.05, left=0.04)
+        elif len(highest_accuracy_runs) == 40:
+            fig, plots = plt.subplots(8, 5, figsize=(50, 80), sharex=True, sharey=True)
+            plt.subplots_adjust(bottom=0.02, top=0.99, right=0.98, wspace=0.05, hspace=0.05, left=0.04)
+        elif len(highest_accuracy_runs) == 56:
+            fig, plots = plt.subplots(8, 7, figsize=(70, 80), sharex=True, sharey=True)
+            plt.subplots_adjust(bottom=0.02, top=0.99, right=0.98, wspace=0.05, hspace=0.05, left=0.04)
+        elif len(highest_accuracy_runs) == 66:
+            fig, plots = plt.subplots(11, 6, figsize=(60, 110), sharex=True, sharey=True)
+            plt.subplots_adjust(bottom=0.02, top=0.99, right=0.98, wspace=0.05, hspace=0.05, left=0.04)
+        elif len(highest_accuracy_runs) == 73:
+            fig, plots = plt.subplots(11, 7, figsize=(70, 110), sharex=True, sharey=True)
+            plt.subplots_adjust(bottom=0.02, top=0.99, right=0.98, wspace=0.05, hspace=0.05, left=0.04)
+        else:
+            raise NotImplementedError
+
+
+    for seq_idx, this_run in enumerate(highest_accuracy_runs[:]):
+        this_run_name = this_run[3]
+        lr_this_run = this_run[4]
+        ssl_weight_this_run = this_run[5]
+        num_epochs_this_run = this_run[6]
         ## now we have the highest accuracy, start fr
         if 'poisoned_mmcl_clean' in this_run_name if poisoned_examples_here == 1500 else 'poisoned_mmcl_5000poison_clean' in this_run_name if poisoned_examples_here == 5000 else 'poisoned_cc6m_mmcl_3000poison_clean' in this_run_name:
             if args.dataset == 'cc3m':
@@ -53,7 +81,6 @@ def plot_best_runs(args, highest_accuracy_runs, accuracy_values, asr_values, tra
 
         else: raise ValueError('Unknown training paradigm')
 
-        # import ipdb; ipdb.set_trace()
         if max(asr_values[this_run_name]) <= 1:
             ## multiply accuracy and asr values by 100
             accuracy_values[this_run_name] = [100.0 * accuracy for accuracy in accuracy_values[this_run_name]]
@@ -62,9 +89,11 @@ def plot_best_runs(args, highest_accuracy_runs, accuracy_values, asr_values, tra
         accuracy_values[this_run_name].insert(0, start_accuracy)
         asr_values[this_run_name].insert(0, start_asr)
 
-        markers = ['o', 's', '^', 'D', 'x']  # Different marker styles
+        if args.make_plot_with_increasing_epochs:
+            markers = ['o', 's', '^', 'D', 'x']  # Different marker styles
+        else:
+            markers = ['o']
         
-        # plt.figure(figsize=(10, 6))
         plt.style.use('seaborn-v0_8-colorblind')
         
         # Assuming accuracy_values and asr_values are defined and this_run_name is set
@@ -73,53 +102,75 @@ def plot_best_runs(args, highest_accuracy_runs, accuracy_values, asr_values, tra
         # Sizes and colors
         sizes = np.linspace(80, 300, epochs)  # Marker sizes
         # colors = np.linspace(0.3, 1, epochs)  # Color intensities
-        intensity = np.linspace(0.2, 0.9, epochs)  # Color intensities
+        intensity = np.linspace(0.3, 1., epochs)  # Color intensities
         # intensity = np.insert(intensity, 0, 0)  # Color intensities     ## for starting we are adding the red star, so we do not need to add the intensity for that point
-        # print(len(intensity), epochs, len(sizes))
-        # Creating a scatter plot for the color mapping
-        # scatter = plt.scatter(asr_values[this_run_name], accuracy_values[this_run_name], c=range(epochs), cmap='Blues', norm=plt.Normalize(vmin=1, vmax=epochs), alpha=0)
-        # Plot a single, invisible point (size=0) for color mapping
+
+        if args.make_plot_with_increasing_epochs:
+            axes_here = plots[seq_idx]
+        elif args.make_plot_with_increasing_epochs_all_runs:
+            if len(highest_accuracy_runs) in [10, 40]:
+                axes_here = plots[seq_idx // 5][seq_idx % 5]
+            elif len(highest_accuracy_runs) in [57, 66]:
+                axes_here = plots[seq_idx // 6][seq_idx % 6]
+            elif len(highest_accuracy_runs) in [56, 73]:
+                axes_here = plots[seq_idx // 7][seq_idx % 7]
+            else: raise NotImplementedError
         if seq_idx == 0:
-            scatter = plots[seq_idx].scatter([0], [0], c=[0], cmap='Blues', norm=plt.Normalize(vmin=1, vmax=epochs), s=0)
+            scatter = axes_here.scatter([0], [0], c=[0], cmap='Blues', norm=plt.Normalize(vmin=1, vmax=epochs), s=0)
             ## add the start accuracy and asr values with a red large star marker
             # plots[seq_idx].plot(start_asr, start_accuracy, marker='*', markersize=20, c='red')
-        plots[seq_idx].scatter(start_asr, start_accuracy, marker='*', color='red', s=500) #, label='Pre-trained model')
-        # plots[seq_idx].legend(loc='lower right', fontsize=14)
+        
+        marker_here = markers[seq_idx % len(markers)]
+        print("Marker here: ", marker_here, seq_idx)
         # Plotting with connecting lines and circular markers
         for i in range(epochs - 1):
-            # plots[seq_idx].plot(asr_values[this_run_name][i:i+2], accuracy_values[this_run_name][i:i+2], f'{markers[seq_idx % len(markers)]}-', c='blue', markersize=sizes[i] / 10, alpha=intensity[i])
-            ## use seaborn to plot the line
-            sns.lineplot(x=asr_values[this_run_name][i:i+2], y=accuracy_values[this_run_name][i:i+2], ax=plots[seq_idx], marker=markers[seq_idx % len(markers)], markersize=sizes[i] / 10, alpha=intensity[i], color='blue', linewidth=2.5)
+            sns.lineplot(x=asr_values[this_run_name][i:i+2], y=accuracy_values[this_run_name][i:i+2], ax=axes_here, marker=marker_here, markersize=sizes[i] / 10, alpha=intensity[i], color='blue', linewidth=8)
         
-        # for i in range(epochs - 1):
-        #     plt.plot(asr_values[this_run_name][i:i+2], accuracy_values[this_run_name][i:i+2], f'{markers[seq_idx % len(markers)]}-', c=colors[seq_idx % len(colors)], markersize=sizes[i] / 10, alpha=intensity[i])
-
-        # Adding labels and title
-        plots[seq_idx].set_xlabel('ASR (in %)', fontsize=21)
-
+        axes_here.scatter(start_asr, start_accuracy, marker='*', color='red', s=500)
         # print(max(accuracy_values[this_run_name]), accuracy_values[this_run_name])
         if training_method == 'mmcl':
-            plots[seq_idx].set_ylim([19, max(accuracy_values[this_run_name]) + 1])
+            axes_here.set_ylim([19, max(accuracy_values[this_run_name]) + 1])
         elif training_method == 'mmcl_ssl':
-            plots[seq_idx].set_ylim([3, max(accuracy_values[this_run_name]) + 1])
+            axes_here.set_ylim([3, max(accuracy_values[this_run_name]) + 1])
         else:
             raise NotImplementedError
-        plots[seq_idx].set_ylabel('Top-1 ImageNet Zeroshot accuracy (in %)', fontsize=28)
+        
+        if args.make_plot_with_increasing_epochs:
+            axes_here.set_ylabel('Top-1 ImageNet Zeroshot accuracy (in %)', fontsize=36)
+            axes_here.set_xlabel('ASR (in %)', fontsize=36)
+        elif args.make_plot_with_increasing_epochs_all_runs:
+            if len(highest_accuracy_runs) > 30:
+                fig.text(0.001, 0.5, 'Top-1 ImageNet Zeroshot accuracy (in %)', va='center', rotation='vertical', fontsize=100)
+            else:
+                fig.text(0.001, 0.5, 'Top-1 ImageNet Zeroshot accuracy (in %)', va='center', rotation='vertical', fontsize=42)
+            axes_here.set_xlabel('ASR (in %)', fontsize=36)
+            axes_here.set_ylim([0, 27])
+            ## add the legend to this plot which displays the lr, ssl weight, and number of epochs. We want to add these to all the subplots, hence it is specific to the axes_here
+            # axes_here.legend(f'({lr_this_run}, {ssl_weight_this_run}, {num_epochs_this_run})', loc='lower right', fontsize=36)
+            legend_string = f'Hyperparams: {lr_this_run}, {ssl_weight_this_run}, {num_epochs_this_run}'
+            # legend_string = f'({lr_this_run}, {ssl_weight_this_run}, {num_epochs_this_run})'
+            axes_here.legend([legend_string], loc='lower right', fontsize=32)
+        else:
+            raise NotImplementedError
 
-        # Adding a color bar to indicate the progression of epochs
-        # cbar = plots[seq_idx].colorbar(scatter, orientation='vertical')
-        # cbar.set_label('Epochs', fontsize=14)
-        # plt.savefig(f'results_plots/individual_run_data/accuracy_vs_asr_over_epochs_{this_run}.png')
-
-    # Creating a scatter plot for the color mapping (invisible, for colorbar)
-    # scatter = plots[0].scatter([0], [0], c=[0], cmap='Blues', norm=plt.Normalize(vmin=1, vmax=epochs), s=0)
+        axes_here.tick_params(axis='both', labelsize=36)
 
     # Adding a color bar to the right of the subplots
-    fig.set_constrained_layout(True)
-    fig.colorbar(scatter, ax=plots, orientation='vertical', fraction=0.015, pad=0.02).set_label('Epochs', fontsize=14)
+    colorbar = fig.colorbar(scatter, ax=plots, orientation='vertical', fraction=0.015, pad=0.02)
+    if len(highest_accuracy_runs) > 30:
+        colorbar.set_label('Finetuning Epochs', fontsize=80)
+    else:
+        colorbar.set_label('Finetuning Epochs', fontsize=36)
+    # Set the ticks to integer values. Adjust the range and step as needed.
+    colorbar.set_ticks([])  # Replace min_value and max_value with your range
     # plt.tight_layout()
+    if args.make_plot_with_increasing_epochs:
+        fig.set_constrained_layout(True)
     # plt.title('Accuracy vs ASR over finetuning epochs for the 3 runs with highest accuracy', fontsize=16)
-    plt.savefig(f'results_plots/individual_run_data/accuracy_vs_asr_over_epochs_{args.dataset}_training_{training_method}_{poisoned_examples_here}_poison_cleaning_{cleaning_method}.pdf')
+    if args.make_plot_with_increasing_epochs:
+        plt.savefig(f'results_plots/individual_run_data/accuracy_vs_asr_over_epochs_{args.dataset}_training_{training_method}_{poisoned_examples_here}_poison_cleaning_{cleaning_method}.pdf')
+    elif args.make_plot_with_increasing_epochs_all_runs:
+        plt.savefig(f'results_plots/individual_run_data/accuracy_vs_asr_over_epochs_{args.dataset}_training_{training_method}_{poisoned_examples_here}_poison_cleaning_{cleaning_method}_all_runs.pdf')
 
 
 
@@ -148,12 +199,18 @@ def process_best_runs(args, accuracy_values, asr_values):
             else: raise NotImplementedError
         else: raise NotImplementedError
 
-        for cleaning_method in cleaning_paradigms:
+        if not args.make_plot_with_increasing_epochs_all_runs:
             asr_boundary = 0.05 if training_method == 'mmcl_ssl' else 0.1 if training_method == 'mmcl' else None
+        else:
+            # asr_boundary = 0.3 if training_method == 'mmcl_ssl' else 0.5 if training_method == 'mmcl' else None        ## this will not work, there is bug in the code
+            asr_boundary = 1
+        for cleaning_method in cleaning_paradigms:
+            print(training_method, asr_boundary, len(asr_values.keys()))
             keys_with_no_asr_less_than_5 = []
             for key in asr_values.keys():
                 if min(asr_values[key]) > asr_boundary:
                     keys_with_no_asr_less_than_5.append(key)
+                # print(f'{key}: {min(asr_values[key])}')
             
             for key in keys_with_no_asr_less_than_5:
                 del asr_values[key]
@@ -164,8 +221,9 @@ def process_best_runs(args, accuracy_values, asr_values):
             ## now we have the runs that have asr values less than 5%. Now we need to find the runs that have the best accuracy for them
             # import ipdb; ipdb.set_trace()
             for this_run in accuracy_values.keys():
-                if "save_this_cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_" in this_run or 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_0.0003' in this_run or 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_2e-4_higher_epochs' in this_run or 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_1e-4_higher_epochs' in this_run:
-                    continue        ## do not count the runs that were started with mmcl ssl finetuning after stopping starting from cleaned point as they are stopped from start. 
+                if args.make_plot_with_increasing_epochs:
+                    if "save_this_cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_" in this_run or 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_0.0003' in this_run or 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_2e-4_higher_epochs' in this_run or 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_1e-4_higher_epochs' in this_run:
+                        continue        ## do not count the runs that were started with mmcl ssl finetuning after stopping starting from cleaned point as they are stopped from start. 
                 assert min(asr_values[this_run]) <= asr_boundary
                 ## remove any runs that are not of this training and cleaning method, ##cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean_mmcl_ssl_lr_
                 training_method_here = this_run.split(f'poisoned_{args.dataset}_')[1].split(f'_{poisoned_examples_here}')[0]
@@ -173,6 +231,13 @@ def process_best_runs(args, accuracy_values, asr_values):
                 assert training_method_here in ['mmcl', 'mmcl_ssl'] and cleaning_method_here in ['mmcl', 'ssl', 'mmcl_ssl'], f'{training_method_here}, {cleaning_method_here}'
                 if training_method_here != training_method or cleaning_method_here != cleaning_method:
                     continue
+                lr_this_run = float(this_run.split(f'lr_')[1].split('_')[0])
+                assert lr_this_run < 1e-2 and lr_this_run >= 1e-9, f'{lr_this_run}'
+                if "_ssl_weight" in this_run:
+                    ssl_weight_this_run = int(this_run.split('_ssl_weight_')[1].split('_')[0])
+                    assert ssl_weight_this_run in [1, 2, 4, 6, 8]
+                else:
+                    ssl_weight_this_run = 1 if "ssl" in cleaning_method_here else 0
                 ## now we need to pair the asr and accuracy values for this run, and then find the pairs where asr is less than 5%
                 if len(asr_values[this_run]) == 40:       ## remember that every epoch had 2 measurements at steps -- so we need to only consider the points at the epoch boundaries
                     ## here we only consider skip the first, third, fifth and so on
@@ -180,12 +245,14 @@ def process_best_runs(args, accuracy_values, asr_values):
                     accuracy_values[this_run] = accuracy_values_here
                     asr_values_here = [asr_values[this_run][i] for i in range(len(asr_values[this_run])) if i % 2 == 1]
                     asr_values[this_run] = asr_values_here
-                    asr_less_than5_accuracy_asr_pairs[this_run] = [(accuracy_values_here[epoch], asr_values_here[epoch], epoch, this_run) for epoch in range(len(asr_values_here)) if asr_values_here[epoch] <= asr_boundary]
+                    asr_less_than5_accuracy_asr_pairs[this_run] = [(accuracy_values_here[epoch], asr_values_here[epoch], epoch, this_run, lr_this_run, ssl_weight_this_run, len(asr_values_here)) for epoch in range(len(asr_values_here)) if asr_values_here[epoch] <= asr_boundary]
                 else:
-                    asr_less_than5_accuracy_asr_pairs[this_run] = [(accuracy_values[this_run][epoch], asr_values[this_run][epoch], epoch, this_run) for epoch in range(len(asr_values[this_run])) if asr_values[this_run][epoch] <= asr_boundary]       ## remember that every epoch had 2 measurements at steps -- so we need to only consider the points at the epoch boundaries
+                    if len(asr_values[this_run]) < 20:      ## these are the failed runs, we do not want to plot them
+                        continue
+                    asr_less_than5_accuracy_asr_pairs[this_run] = [(accuracy_values[this_run][epoch], asr_values[this_run][epoch], epoch, this_run, lr_this_run, ssl_weight_this_run, len(asr_values[this_run])) for epoch in range(len(asr_values[this_run])) if asr_values[this_run][epoch] <= asr_boundary]
                 ## we want to append the pair with the highest accuracy to the highest_accuracy_runs list. We want to have atmost three pairs in that list across the runs.
                 ## so we need to sort the pairs and then append the highest accuracy pair to the list.
-                asr_less_than5_accuracy_asr_pairs[this_run].sort(key=lambda x: x[0], reverse=True)
+                asr_less_than5_accuracy_asr_pairs[this_run].sort(key=lambda x: x[0], reverse=True)      ## This code is just used for finding the runs with the highest accuracy with ASR less than the asr_boundary, it is not used for plotting -- for that all epochs are used. 
                 highest_accuracy_runs.extend(asr_less_than5_accuracy_asr_pairs[this_run])
                 highest_accuracy_runs.sort(key=lambda x: x[0], reverse=True)
             
@@ -193,7 +260,7 @@ def process_best_runs(args, accuracy_values, asr_values):
             run_names_seen = set()
             remove_indices = []
             for idx, tuples in enumerate(highest_accuracy_runs):
-                run_name = tuples[-1]
+                run_name = tuples[3]
                 if run_name in run_names_seen:
                     # highest_accuracy_runs.remove(tuples)
                     remove_indices.append(idx)
@@ -203,9 +270,22 @@ def process_best_runs(args, accuracy_values, asr_values):
             for idx in remove_indices[::-1]:
                 highest_accuracy_runs.pop(idx)
 
-            highest_accuracy_runs = highest_accuracy_runs[:8]     ## we only want to keep the top 5 runs
+            print(len(highest_accuracy_runs), "SEEEE")
             ## now we have the highest accuracy runs. print them
-            print(f"{args.dataset}, {training_method}, {cleaning_method}")
+            if args.make_plot_with_increasing_epochs:
+                highest_accuracy_runs = highest_accuracy_runs[:3]     ## we only want to keep the top 5 runs
+            elif args.make_plot_with_increasing_epochs_all_runs:
+                if training_method == 'mmcl_ssl':
+                    highest_accuracy_runs = highest_accuracy_runs[:56]
+                elif training_method == 'mmcl':
+                    highest_accuracy_runs = highest_accuracy_runs[:10]
+                else:   raise NotImplementedError
+                ## once over here, we can sort the highest_accuracy_runs with lr, ssl_weights, and the number of epochs -- we will give highest priority to lr, then ssl_weight, and then number of epochs and we want to sort in increasing order of these values
+                highest_accuracy_runs.sort(key=lambda x: (x[6], x[5], x[4]))
+            else:   raise NotImplementedError
+            
+            print(f"{args.dataset}, {training_method}, {cleaning_method}, {len(highest_accuracy_runs)}")
+            
             for i in range(len(highest_accuracy_runs)):
                 print(f'Run {i}: {highest_accuracy_runs[i]}')
 
@@ -223,16 +303,19 @@ parser.add_argument('--plot_ssl_weight', action='store_true')           ## If th
 parser.add_argument('--deep_clustering_experiment', action='store_true', help='This is the plots for deep clustering experiments.')
 parser.add_argument('--deep_clustering_cheating_experiment', action='store_true', help='This is the plots for deep clustering cheating experiments.')
 parser.add_argument('--make_plot_with_increasing_epochs', action='store_true', help='These are the plots for selected runs for the models that have highest accuracy with ASR < 5%')
+parser.add_argument('--make_plot_with_increasing_epochs_all_runs', action='store_true', help='These are the plots for all the runs')
 parser.add_argument('--clean_with_heavy_regularization', action='store_true', help='This is the plots for runs with heavy regularization in the finetuning process which we did for MMCL + SSL trained model')
 parser.add_argument('--clean_with_shrink_and_perturb', action='store_true', help='This will plot the runs when cleaning is done with shrinking and perturbing the model parameters')
 parser.add_argument('--side_by_side_cleaning_20_epochs_100_epochs', action='store_true', help='This plot will make the side by side plot of cleaning with 20 epochs and 100 epochs for the MMCL + SSL pre-trained model. ')
+parser.add_argument('--accuracy_and_asr_original_pre_training', action='store_true', help='This will plot the accuracy and ASR values for the original pre-trained model.')
+parser.add_argument('--pre_training_objective', type=str, default=None, choices=['mmcl', 'mmcl_ssl'])
 args = parser.parse_args()
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 
-if args.make_plot_with_increasing_epochs:
+if args.make_plot_with_increasing_epochs or args.make_plot_with_increasing_epochs_all_runs:
     import json
     if args.dataset == 'cc3m':
         if args.clean_with_slight_poison:
@@ -270,6 +353,158 @@ if args.make_plot_with_increasing_epochs:
     process_best_runs(args, accuracy_values, asr_values)
     exit()
 
+
+if args.accuracy_and_asr_original_pre_training:
+    import json
+    file_name = 'results_plots/accuracy_and_asr_values_original_pre_training.json'
+    
+    if not os.path.exists(file_name):
+        data = {}
+        with open(file_name, 'w') as f:
+            json.dump(data, f)
+    
+    this_run_key = args.dataset + "_" + args.pre_training_objective
+    with open(file_name, 'r') as f:
+        data = json.load(f)
+
+    if not this_run_key in data.keys():
+        print("Fetching the accuracy and ASR values for the original pre-trained model from wandb.")
+        api = wandb.Api()
+        if args.dataset == 'cc6m':
+            project_path = "vsahil/clip-cc6m-pre-training"
+            # Fetch all runs from the specified project
+            runs = api.runs(project_path)
+            if args.pre_training_objective == 'mmcl':
+                # run_path = "vsahil/clip-cc6m-pre-training/train_cc6m_poison_mmcl_1e_3"
+                run_id = "sxfmf305"
+                specific_runs = [api.run(f"{project_path}/{run_id}")]
+            elif args.pre_training_objective == 'mmcl_ssl':
+                # run_path = "vsahil/clip-cc6m-pre-training/train_cc6m_poison_mmcl_ssl_1e_3_batch1024"
+                run_id1 = "v15rlm43"
+                run_id2 = "scpwxhdy"
+                specific_runs = [api.run(f"{project_path}/{run_id1}"), api.run(f"{project_path}/{run_id2}")]
+            else:
+                raise NotImplementedError
+        elif args.dataset == 'cc3m':
+            project_path = "vsahil/clip-cc3m-pre-training"
+            ## we didn't track the accuracy and ASR at each epoch for these models. 
+            raise NotImplementedError
+
+        # # Print details of each run
+        # for run in runs:
+        #     print(f"Run ID: {run.id}, Name: {run.name}, State: {run.state}")
+
+        # Initialize lists to store values
+        accuracy_values = []
+        asr_values = []
+        val_accuracy = None
+        val_asr = None
+
+        for specific_run in specific_runs:
+            # Iterate through the run history
+            for row in specific_run.scan_history():
+                # Check if the accuracy key exists in this row
+                if 'evaluation/zeroshot_top1' in row:
+                    val_accuracy = row['evaluation/zeroshot_top1']
+                
+                # Check if the ASR key exists in this row
+                if 'evaluation/asr_top1' in row:
+                    val_asr = row['evaluation/asr_top1']
+                
+                if val_accuracy is not None:
+                    accuracy_values.append(val_accuracy)
+                    val_accuracy = None
+                
+                if val_asr is not None:
+                    asr_values.append(val_asr)
+                    val_asr = None
+
+            assert len(accuracy_values) == len(asr_values)
+        
+        if args.pre_training_objective == 'mmcl_ssl' and args.dataset == 'cc6m':
+            accuracy_values.insert(0, 0.09902)
+            asr_values.insert(0, 0.9448)
+            
+        elif args.pre_training_objective == 'mmcl' and args.dataset == 'cc6m':
+            accuracy_values.insert(0, 0.07852)
+            asr_values.insert(0, 0.9356)
+
+        accuracy_values.insert(0, 0.0)
+        asr_values.insert(0, 0.0)
+
+        accuracy_values = [100.0 * accuracy for accuracy in accuracy_values]
+        asr_values = [100.0 * asr for asr in asr_values]
+
+        print("Accuracy Values:", len(accuracy_values), accuracy_values, "\n")
+        print("ASR Values:", len(asr_values), asr_values)
+
+        ## save the accuracy and asr values in a json file. This json file will have the accuracy and ASR dynamic for all the pre-trained models, and hence we add to this file rather than overwriting it.
+        import json
+        file_name = 'results_plots/accuracy_and_asr_values_original_pre_training.json'
+        with open(file_name, 'r') as f:
+            data = json.load(f)
+        data[args.dataset + "_" + args.pre_training_objective] = {'accuracy': accuracy_values, 'asr': asr_values}
+        with open(file_name, 'w') as f:
+            json.dump(data, f)
+        exit()
+    else:
+        accuracy_values = data[this_run_key]['accuracy']
+        asr_values = data[this_run_key]['asr']
+
+        if args.pre_training_objective == 'mmcl':
+            if args.dataset == 'cc3m':
+                start_accuracy = 16.00
+                start_asr = 99.88
+            elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
+                start_accuracy = 23.756
+                start_asr = 99.98
+            else: raise NotImplementedError
+        elif args.pre_training_objective == 'mmcl_ssl':
+            if args.dataset == 'cc3m':
+                start_accuracy = 17.04
+                start_asr = 99.03
+            elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
+                start_accuracy = 23.862
+                start_asr = 99.45
+            else: raise NotImplementedError
+        else: raise NotImplementedError
+
+        # import ipdb; ipdb.set_trace()
+        assert start_accuracy in accuracy_values, f'{start_accuracy}, {accuracy_values}'
+        start_accuracy_index = accuracy_values.index(start_accuracy)
+        assert start_asr == round(asr_values[start_accuracy_index], 2), f'{start_asr}, {asr_values[start_accuracy_index]}'
+
+        print("Plotting the accuracy and ASR values for the original pre-trained model using the data from the json file.")
+        ## now we have the accuracy and asr values, we need to plot them in two subplots. The first plot will show the change in accuracy with epochs, and the second plot will show the change in ASR with epochs. We need to make a line plot for both of them.
+        import matplotlib.pyplot as plt
+        sns.set_context("poster", font_scale=1)
+        sns.set_style("whitegrid")
+        fig, plots = plt.subplots(1, 2, figsize=(30, 12), sharex=True, sharey=False)        ## since accuracy and ASR are on very different scales, we do not want to share the y-axis
+        epochs = len(accuracy_values)
+        ## epochs on x-axis, and accuracy/ASR on y-axis. Since epochs is on the x-axis, we do not need increasing size of markers and increasing intensity of colors -- just use the same marker and color for all the points.
+        sns.lineplot(x=range(epochs), y=accuracy_values, ax=plots[0], marker='o', markersize=10, markerfacecolor='black', color='steelblue', linewidth=8, alpha=0.9)
+        sns.lineplot(x=range(epochs), y=asr_values, ax=plots[1], marker='o', markersize=10, markerfacecolor='black', color='steelblue', linewidth=8, alpha=0.9)
+        ## mark the model with the start accuracy and ASR values with a red star marker
+        plots[0].plot(start_accuracy_index, start_accuracy, marker='*', color='red', markersize=40, label='Selected Model\'s Accuracy')
+        plots[1].plot(start_accuracy_index, start_asr, marker='*', color='red', markersize=40, label='Selected Model\'s ASR')
+        plots[0].set_xlabel('Pre-training Epochs', fontsize=36)
+        plots[1].set_xlabel('Pre-training Epochs', fontsize=36)
+        plots[0].set_ylabel('Top-1 ImageNet Zeroshot accuracy (in %)', fontsize=36)
+        plots[1].set_ylabel('ASR (in %)', fontsize=36)
+        plots[0].tick_params(axis='both', labelsize=36)
+        plots[1].tick_params(axis='both', labelsize=36)
+        plots[0].set_title('Accuracy vs Epochs', fontsize=36)
+        plots[1].set_title('ASR vs Epochs', fontsize=36)
+        plots[0].legend(loc='lower right', fontsize=36)
+        plots[1].legend(loc='lower right', fontsize=36)
+        pre_training_objective = 'MMCL + SSL' if args.pre_training_objective == 'mmcl_ssl' else 'MMCL'
+        training_dataset = 'CC6M' if args.dataset == 'cc6m' else 'CC3M'
+        plt.suptitle(f'Accuracy and ASR values vs Epochs for the {pre_training_objective} pre-trained model on {training_dataset} dataset', fontsize=36)
+        plt.tight_layout()
+        plt.savefig(f'accuracy_vs_asr_over_epochs_{args.dataset}_pre_training_{args.pre_training_objective}.pdf')
+    
+    exit()
+        
 
 ## read combinations from json file
 import json
@@ -333,7 +568,7 @@ else:
     cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
 
 
-def extract_plot(combinations, combination, plt, filtering=None, marker='o', alpha=0.8, start_asr=None, start_accuracy=None, color_here=None, legend_label=None, skip_legend=False):
+def extract_plot(combinations, combination, plt, filtering=None, marker='o', alpha=0.8, start_asr=None, start_accuracy=None, color_here=None, legend_label=None, skip_legend=False, skip_y_label=False):
     if len(combinations[combination]) == 0:
         print(f'No data for {combination}')
         return
@@ -342,14 +577,16 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
     accuracy_values = np.array(combinations[combination][1])
     assert asr_values.shape[0] == accuracy_values.shape[0]  #== 21 * 8
     plt.set_xlabel('ASR (in %)', fontsize=28)
-    plt.set_ylabel('Top-1 ImageNet Zeroshot accuracy (in %)', fontsize=28)
+    plt.tick_params(axis='both', labelsize=28)
+    if not skip_y_label:
+        plt.set_ylabel('Top-1 ImageNet Zeroshot accuracy (in %)', fontsize=28)
     if "cleaningdata_poison" in combination:
         cleaningdata_poison_number = int(combination.split('_')[-1])
         assert cleaningdata_poison_number in [0, 1, 2, 3, 4, 5, 10, 25]
         if cleaningdata_poison_number == 0:
-            color = 'orange'
             cleaning_label = 'No poison'
-            marker = 'X'
+            color = 'darkmagenta'
+            marker='s'
         elif cleaningdata_poison_number == 1:
             color = 'navy'
             cleaning_label = '1 poison'
@@ -367,13 +604,14 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
             cleaning_label = '4 poisons'
             marker = 'd'
         elif cleaningdata_poison_number == 5: 
-            color = 'red'
+            color = 'black'
             cleaning_label = '5 poisons'
-            marker = 's'
+            marker = 'o'
         elif cleaningdata_poison_number == 10:
-            color = 'purple'
+            color = 'maroon'
             cleaning_label = '10 poisons'
             marker = '^'
+            alpha = 0.5 if "clean_mmcl_lr" in combination else 0.8
         elif cleaningdata_poison_number == 25:
             color = 'blue'
             cleaning_label = '25 poisons'
@@ -395,9 +633,9 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
             import ipdb; ipdb.set_trace()
         assert this_ssl_weight in [1, 2, 4, 6, 8]
         if this_ssl_weight == 1:
-            color = 'orange'    #'black'
+            color = 'darkmagenta'    #'black'
             cleaning_label = 'SSL weight 1'
-            marker = 'X'
+            marker = 's'
         elif this_ssl_weight == 2:
             color = 'navy'
             cleaning_label = 'SSL weight 2'
@@ -409,11 +647,11 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
         elif this_ssl_weight == 6:
             color = 'red'
             cleaning_label = 'SSL weight 6'
-            marker = 'P'
+            marker = 'X'
         elif this_ssl_weight == 8:
             color = 'black'
             cleaning_label = 'SSL weight 8'
-            marker = 'd'
+            marker = 'D'
         else:
             raise NotImplementedError
         
@@ -428,13 +666,16 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
     else:
         ## make sure we have the color right
         if 'clean_mmcl_lr' in combination:
-            color = 'navy'
+            color='black'
+            marker = 'o'
             cleaning_label = 'Finetuning with MMCL loss'
         elif 'clean_ssl_lr' in combination:
             color = 'maroon'
+            marker='X'
             cleaning_label = 'Finetuning with SSL loss'
         elif 'clean_mmcl_ssl_lr' in combination:
-            color = 'orange'
+            color = 'darkmagenta'
+            marker='s'
             cleaning_label = 'Finetuning with MMCL + SSL loss'
         else:
             raise ValueError('Unknown cleaning paradigm')
@@ -443,10 +684,10 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
     #     ## remove asr, accuracy pairs where asr is less than 0.9 and accuracy is less than 0.55
     # print the max accuracy for asr less than 5% and 10%
     # print(combination, end='\n')
-    # try:
-    #     print("best acuracy less than 5%:", max(accuracy_values[asr_values <= 0.05]))
-    # except ValueError:
-    #     print('No model with ASR less than 5%')
+    try:
+        print("best acuracy less than 5%:", max(accuracy_values[asr_values <= 0.05]))
+    except ValueError:
+        print('No model with ASR less than 5%')
     # # try:
     # #     print("best acuracy less than 10%:", max(accuracy_values[asr_values <= 0.1]))
     # # except ValueError:
@@ -455,7 +696,7 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
     # return
 
     ## make sure the axis axes ranges are the same
-    print(min(asr_values), combination, "\n")
+    # print(min(asr_values), combination, "\n")
     asr_values *= 100
     accuracy_values *= 100
     plt.set_xlim([-10, 110])
@@ -489,7 +730,6 @@ if args.clean_with_heavy_regularization or args.clean_with_shrink_and_perturb:
     one_plot = True
 
 
-
 if allsix:
     fig, plots = plt.subplots(2, 3, figsize=(20, 30), sharex=True, sharey=True)
     for combination in combinations.keys():
@@ -504,13 +744,13 @@ if allsix:
 
             if 'clean_mmcl_lr' in combination:
                 extract_plot(combination, plots[0][0], marker='o', alpha=0.5) #, start_asr=start_asr, start_accuracy=start_accuracy)
-                plots[0][0].set_title('Model trained with MMCL, cleaned with MMCL')
+                plots[0][0].set_title('Model trained with MMCL, cleaned with MMCL', fontsize=28)
             elif 'clean_ssl_lr' in combination:
                 extract_plot(combination, plots[0][1], marker='s') #, start_asr=start_asr, start_accuracy=start_accuracy)
-                plots[0][1].set_title('Model trained with MMCL, cleaned with SSL')
+                plots[0][1].set_title('Model trained with MMCL, cleaned with SSL', fontsize=28)
             elif 'clean_mmcl_ssl_lr' in combination:
                 extract_plot(combination, plots[0][2], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-                plots[0][2].set_title('Model trained with MMCL, cleaned with MMCL+SSL')
+                plots[0][2].set_title('Model trained with MMCL, cleaned with MMCL+SSL', fontsize=28)
         elif 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
             if args.dataset == 'cc3m':
                 start_accuracy = 17.04
@@ -522,13 +762,13 @@ if allsix:
 
             if 'clean_mmcl_lr' in combination:
                 extract_plot(combination, plots[1][0], marker='o', alpha=0.5) #, start_asr=start_asr, start_accuracy=start_accuracy)
-                plots[1][0].set_title('Model trained with MMCL+SSL, cleaned with MMCL')
+                plots[1][0].set_title('Model trained with MMCL+SSL, cleaned with MMCL', fontsize=28)
             elif 'clean_ssl_lr' in combination:
                 extract_plot(combination, plots[1][1], marker='s') #, start_asr=start_asr, start_accuracy=start_accuracy)
-                plots[1][1].set_title('Model trained with MMCL+SSL, cleaned with SSL')
+                plots[1][1].set_title('Model trained with MMCL+SSL, cleaned with SSL', fontsize=28)
             elif 'clean_mmcl_ssl_lr' in combination:
                 extract_plot(combination, plots[1][2], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-                plots[1][2].set_title('Model trained with MMCL+SSL, cleaned with MMCL+SSL')
+                plots[1][2].set_title('Model trained with MMCL+SSL, cleaned with MMCL+SSL', fontsize=28)
         else: raise ValueError('Unknown training paradigm')
         # plt.legend(loc='lower right')
         ## set legend of all subplots to lower right
@@ -549,9 +789,10 @@ if allsix:
         else:
             raise NotImplementedError
 
-
+# import ipdb; ipdb.set_trace()
 if two_plots:
-    fig, plots = plt.subplots(1, 2, figsize=(20, 10))
+    fig, plots = plt.subplots(1, 2, figsize=(30, 10), sharey=True, sharex=True)
+    smaller_font = False
     # import ipdb; ipdb.set_trace()
     for combination in combinations.keys():
         if 'poisoned_mmcl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_3000poison_clean' in combination:
@@ -571,7 +812,7 @@ if two_plots:
                 extract_plot(combinations, combination, plots[0], marker='s') #, start_asr=start_asr, start_accuracy=start_accuracy)
             elif 'clean_mmcl_ssl_lr' in combination:
                 extract_plot(combinations, combination, plots[0], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots[0].set_title(f'Model pre-trained with MMCL objective {dataset_text}') #, cleaning with different paradigms for {poisoned_examples[0]} poisoned examples')
+            plots[0].set_title(f'Model pre-trained with MMCL objective {dataset_text}', fontsize=21 if smaller_font else 29) #, cleaning with different paradigms for {poisoned_examples[0]} poisoned examples')
         
         elif 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
             if args.dataset == 'cc3m':
@@ -585,20 +826,22 @@ if two_plots:
             else: raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination:
-                extract_plot(combinations, combination, plots[1], marker='o', alpha=0.5) #, start_asr=start_asr, start_accuracy=start_accuracy)
+                extract_plot(combinations, combination, plots[1], alpha=0.5, skip_y_label=True)
             elif 'clean_ssl_lr' in combination:
-                extract_plot(combinations, combination, plots[1], marker='s') #, start_asr=start_asr, start_accuracy=start_accuracy)
+                extract_plot(combinations, combination, plots[1], skip_y_label=True)
             elif 'clean_mmcl_ssl_lr' in combination:
-                extract_plot(combinations, combination, plots[1], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots[1].set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+                extract_plot(combinations, combination, plots[1], start_asr=start_asr, start_accuracy=start_accuracy, skip_y_label=True)
+            plots[1].set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}', fontsize=21 if smaller_font else 29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+        
         else: raise ValueError('Unknown training paradigm')
         ## set legend of all subplots to lower right
     
-    plots[0].legend(loc='lower right')
-    plots[1].legend(loc='lower right')
+    plots[0].legend(loc='lower right', fontsize=21 if smaller_font else 28)
+    plots[1].legend(loc='lower right', fontsize=21 if smaller_font else 28)
+
     plt.tight_layout()
     if args.dataset == 'cc3m':
-        plt.savefig(f'two_plots_cleaning_plot_CC3M_pretrained_{poisoned_examples[0]}.pdf')
+        plt.savefig(f'two_plots_cleaning_plot_CC3M_pretrained_{poisoned_examples[0]}.png')
     elif args.dataset == 'cc6m':
         plt.savefig(f'two_plots_cleaning_plot_CC6M_pretrained_{poisoned_examples[0]}.png')
     elif args.dataset == 'cc6m-200k':
@@ -610,7 +853,7 @@ if two_plots:
 
 
 if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
-    fig, plots = plt.subplots(1, 1, figsize=(10, 10))
+    fig, plots = plt.subplots(1, 1, figsize=(15, 10))
     for combination in combinations.keys():
         if combinations[combination] == []:
             print(f'No data for {combination}')
@@ -619,31 +862,32 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
             if args.dataset == 'cc3m':
                 start_accuracy = 17.04
                 start_asr = 99.03
+                dataset_text = '(CC3M dataset)'
             elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
                 start_accuracy = 23.86
                 start_asr = 99.45
+                dataset_text = '(CC6M dataset)'
             else: raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination:
-                extract_plot(combinations,  combination, plots, marker='o', legend_label='Finetuning with MMCL + Regl. loss' if args.clean_with_heavy_regularization else None) 
+                extract_plot(combinations,  combination, plots, legend_label='Finetuning with MMCL + $\ell_2$' if args.clean_with_heavy_regularization else None, alpha=0.5) 
             elif 'clean_ssl_lr' in combination:
-                extract_plot(combinations,  combination, plots, marker='s', legend_label='Finetuning with SSL + Regl. loss' if args.clean_with_heavy_regularization else None)
+                extract_plot(combinations,  combination, plots, legend_label='Finetuning with SSL + $\ell_2$' if args.clean_with_heavy_regularization else None)
             elif 'clean_mmcl_ssl_lr' in combination:
                 # extract_plot(combination, plots, marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-                extract_plot(combinations, combination, plots, marker='X', start_asr=start_asr, start_accuracy=start_accuracy, legend_label='Finetuning with MMCL + SSL + Regl. loss' if args.clean_with_heavy_regularization else None)
+                extract_plot(combinations, combination, plots, start_asr=start_asr, start_accuracy=start_accuracy, legend_label='Finetuning with MMCL + SSL + $\ell_2$' if args.clean_with_heavy_regularization else None)
             if args.deep_clustering_experiment:
-                plots.set_title(f'Model pre-trained with MMCL + SSL objective, cleaning with deep clustering')
+                plots.set_title(f'Model pre-trained with MMCL + SSL objective, cleaning with deep clustering', fontsize=29)
             elif args.deep_clustering_cheating_experiment:
-                plots.set_title(f'Model pre-trained with MMCL + SSL objective, cleaning with deep clustering true labels')
+                plots.set_title(f'Model pre-trained with MMCL + SSL objective, cleaning with deep clustering true labels', fontsize=29)
             elif args.clean_with_heavy_regularization or args.clean_with_shrink_and_perturb:
-                ## no need to set the title here
-                pass
+                plots.set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}', fontsize=29)
             else:
-                plots.set_title(f'Model pre-trained with MMCL + SSL objective') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+                plots.set_title(f'Model pre-trained with MMCL + SSL objective', fontsize=29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
         else: raise ValueError(f'Unknown training paradigm: {combination}')
 
                 ## set legend of all subplots to lower right
-        plots.legend(loc='lower right')
+        plots.legend(loc='lower right', fontsize=28)
         # plots[1].legend(loc='lower right')
         plt.tight_layout()
         if args.deep_clustering_experiment:
@@ -695,7 +939,8 @@ if args.side_by_side_cleaning_100_and_200k:
     combinations_100 = {k:v for k,v in combinations_100.items() if 'poisoned_cc6m_mmcl_3000poison_clean' not in k}
     ## combination_100 will have the cleaning plot for cleaning of the MMCL+SSL model with 100k datapoints
     ## combination_200 will have the cleaning plot for cleaning of the MMCL+SSL model with 200k datapoints
-    fig, plots = plt.subplots(1, 2, figsize=(20, 10))
+    fig, plots = plt.subplots(1, 2, figsize=(30, 10), sharex=True, sharey=True)
+    # plt.subplots_adjust(wspace=)
     for combination in combinations_100.keys():
         if 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
             if args.dataset == 'cc3m':
@@ -709,12 +954,12 @@ if args.side_by_side_cleaning_100_and_200k:
             else: raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination:
-                extract_plot(combinations_100, combination, plots[0], marker='o', alpha=0.5) #, start_asr=start_asr, start_accuracy=start_accuracy)
+                extract_plot(combinations_100, combination, plots[0], alpha=0.5) #, start_asr=start_asr, start_accuracy=start_accuracy)
             elif 'clean_ssl_lr' in combination:
-                extract_plot(combinations_100, combination, plots[0], marker='s') #, start_asr=start_asr, start_accuracy=start_accuracy)
+                extract_plot(combinations_100, combination, plots[0]) #, start_asr=start_asr, start_accuracy=start_accuracy)
             elif 'clean_mmcl_ssl_lr' in combination:
-                extract_plot(combinations_100, combination, plots[0], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots[0].set_title(f'Models pre-trained with MMCL + SSL, cleaned with 100k datapoints {dataset_text}') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+                extract_plot(combinations_100, combination, plots[0], start_asr=start_asr, start_accuracy=start_accuracy)
+            plots[0].set_title(f'Models pre-trained with MMCL + SSL, cleaned with 100k datapoints {dataset_text}', fontsize=27) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
         else: raise ValueError(f'Unknown training paradigm: {combination}')
             
                     ## set legend of all subplots to lower right
@@ -732,15 +977,15 @@ if args.side_by_side_cleaning_100_and_200k:
             else: raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination:
-                extract_plot(combinations_200, combination, plots[1], marker='o', alpha=0.5)
+                extract_plot(combinations_200, combination, plots[1],  alpha=0.5, skip_y_label=True)
             elif 'clean_ssl_lr' in combination:
-                extract_plot(combinations_200, combination, plots[1], marker='s')
+                extract_plot(combinations_200, combination, plots[1], skip_y_label=True)
             elif 'clean_mmcl_ssl_lr' in combination:
-                extract_plot(combinations_200, combination, plots[1], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots[1].set_title(f'Models pre-trained with MMCL + SSL, cleaned with 200k datapoints {dataset_text}')
+                extract_plot(combinations_200, combination, plots[1], start_asr=start_asr, start_accuracy=start_accuracy, skip_y_label=True)
+            plots[1].set_title(f'Models pre-trained with MMCL + SSL, cleaned with 200k datapoints {dataset_text}', fontsize=27)
         else: raise ValueError(f'Unknown training paradigm: {combination}')
-    plots[0].legend(loc='lower right')
-    plots[1].legend(loc='lower right')
+    plots[0].legend(loc='lower right', fontsize=28)
+    plots[1].legend(loc='lower right', fontsize=28)
     plt.tight_layout()
     if args.dataset == 'cc3m':
         plt.savefig(f'side_by_side_cleaning_plot_CC3M_pretrained_{poisoned_examples[0]}.pdf')
@@ -766,7 +1011,7 @@ if args.side_by_side_cleaning_20_epochs_100_epochs:
     for combination in combinations_lower_epochs.keys():
         combinations_lower_epochs[combination] = [combinations_lower_epochs[combination]['asr'], combinations_lower_epochs[combination]['accuracy']]
 
-    fig, plots = plt.subplots(1, 2, figsize=(20, 10))
+    fig, plots = plt.subplots(1, 2, figsize=(30, 10), sharex=True, sharey=True)
     skip_legend_lower_epochs = False
     skip_legend_higher_epochs = False
     # import ipdb; ipdb.set_trace()
@@ -793,10 +1038,10 @@ if args.side_by_side_cleaning_20_epochs_100_epochs:
                     ssl_weight_here = int(combination.split('_ssl_weight_')[1].split("_")[0])
                     if ssl_weight_here > 1:     ## we only want to compare the ssl weight 1. 
                         continue
-                extract_plot(combinations_lower_epochs, combination, plots[0], marker='X', skip_legend=skip_legend_lower_epochs)
+                extract_plot(combinations_lower_epochs, combination, plots[0], skip_legend=skip_legend_lower_epochs)
                 if not skip_legend_lower_epochs:
                     skip_legend_lower_epochs = True
-            plots[0].set_title(f'Models pre-trained with MMCL + SSL, finetuned to 20 epochs {dataset_text}')
+            plots[0].set_title(f'Models pre-trained with MMCL + SSL, finetuned to 20 epochs {dataset_text}', fontsize=29)
         elif 'poisoned_cc6m_mmcl_3000poison' in combination:        ## we only want the mmcl_ssl cleaning here
             pass
         else: raise ValueError(f'Unknown training paradigm: {combination}')
@@ -823,24 +1068,23 @@ if args.side_by_side_cleaning_20_epochs_100_epochs:
                 # extract_plot(combinations_higher_epochs, combination, plots[1], marker='s')
                 pass
             elif 'clean_mmcl_ssl_lr' in combination:
-                extract_plot(combinations_higher_epochs, combination, plots[1], marker='X', skip_legend=skip_legend_higher_epochs)
+                extract_plot(combinations_higher_epochs, combination, plots[1], skip_legend=skip_legend_higher_epochs, skip_y_label=True)
                 if not skip_legend_higher_epochs:
                     skip_legend_higher_epochs = True
-            plots[1].set_title(f'Models pre-trained with MMCL + SSL, finetuned to 100 epochs {dataset_text}')
+            plots[1].set_title(f'Models pre-trained with MMCL + SSL, finetuned to 100 epochs {dataset_text}', fontsize=29)
         elif 'poisoned_cc6m_mmcl_3000poison' in combination:        ## we only want the mmcl_ssl cleaning here
             pass
         else: raise ValueError(f'Unknown training paradigm: {combination}')
     
     plots[1].scatter(start_asr, start_accuracy, marker='*', color='red', s=500, label='Pre-trained model')
-    plots[0].legend(loc='lower right')
-    plots[1].legend(loc='lower right')
+    plots[0].legend(loc='lower right', fontsize=28)
+    plots[1].legend(loc='lower right', fontsize=28)
     plt.tight_layout()
     
     if args.dataset == 'cc6m':
         plt.savefig(f'side_by_side_cleaning_20_epochs_100_epochs_plot_CC6M_pretrained_{poisoned_examples[0]}.pdf')
     else:
         raise NotImplementedError
-
 
 
 if args.clean_with_slight_poison:
@@ -878,48 +1122,50 @@ if args.clean_with_slight_poison:
 
     # import ipdb; ipdb.set_trace()
     ## We will make two plots, left with be the model pre-trained with MMCL and right will be the model pre-trained with mmcl+SSL. The cleaning will only be mmcl+ssl
-    fig, plots = plt.subplots(1, 2, figsize=(20, 10), sharey=True, sharex=True)
+    fig, plots = plt.subplots(1, 2, figsize=(30, 10), sharey=True, sharex=True)
     for combination in combinations.keys():
         ## we want to make sure we give different colors to the different number of cleaning poisons
         if 'poisoned_cc3m_mmcl_1500poison_clean' in combination if here_poisoned_examples == 1500 else 'poisoned_mmcl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_3000poison_clean' in combination if here_poisoned_examples == 3000 else None:
             if args.dataset == 'cc3m':
-                start_accuracy = 16.00
-                start_asr = 99.88
+                start_accuracy_mmcl = 16.00
+                start_asr_mmcl = 99.88
                 dataset_text = '(CC3M dataset)'
             elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
-                start_accuracy = 23.76
-                start_asr = 99.98
+                start_accuracy_mmcl = 23.76
+                start_asr_mmcl = 99.98
                 dataset_text = '(CC6M dataset)'
             else: raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination or 'clean_ssl_lr' in combination:
                 raise NotImplementedError
             elif 'clean_mmcl_ssl_lr' in combination:
-                extract_plot(combinations, combination, plots[0], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots[0].set_title(f'Model pre-trained with MMCL objective {dataset_text}')
+                extract_plot(combinations, combination, plots[0], start_asr=None, start_accuracy=None)
+            plots[0].set_title(f'Model pre-trained with MMCL objective {dataset_text}', fontsize=29)
         
         elif 'poisoned_cc3m_mmcl_ssl_1500poison_clean' in combination if here_poisoned_examples == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination if here_poisoned_examples == 3000 else None:
             if args.dataset == 'cc3m':
-                start_accuracy = 17.04
-                start_asr = 99.03
+                start_accuracy_mmcl_ssl = 17.04
+                start_asr_mmcl_ssl = 99.03
                 dataset_text = '(CC3M dataset)'
             elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
-                start_accuracy = 23.86
-                start_asr = 99.45
+                start_accuracy_mmcl_ssl = 23.86
+                start_asr_mmcl_ssl = 99.45
                 dataset_text = '(CC6M dataset)'
             else: raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination or 'clean_ssl_lr' in combination:
                 raise NotImplementedError
             elif 'clean_mmcl_ssl_lr' in combination:
-                extract_plot(combinations, combination, plots[1], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots[1].set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+                extract_plot(combinations, combination, plots[1], start_asr=None, start_accuracy=None, skip_y_label=True)
+            plots[1].set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}', fontsize=29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
 
         else: raise ValueError(f'Unknown training paradigm {combination}')
 
+    plots[0].scatter(start_asr_mmcl, start_accuracy_mmcl, marker='*', color='red', s=500, label='Pre-trained model')
+    plots[1].scatter(start_asr_mmcl_ssl, start_accuracy_mmcl_ssl, marker='*', color='red', s=500, label='Pre-trained model')
     ## set legend of all subplots to lower right
-    plots[0].legend(loc='lower right')
-    plots[1].legend(loc='lower right')
+    plots[0].legend(loc='lower right', fontsize=28)
+    plots[1].legend(loc='lower right', fontsize=28)
     plt.tight_layout()
     ## share the x axes
     plt.savefig(f'two_plots_cleaning_plot_{here_dataset}_pretrained_{here_poisoned_examples}_cleaned_100k_poisoned.pdf')
@@ -1007,8 +1253,8 @@ if args.plot_with_increasing_epochs:
                 raise NotImplementedError
             sns.scatterplot(x=asr_values_here, y=accuracy_values_here, label='Finetuning with MMCL + SSL loss', color='blue', ax=plot_here, marker='s', alpha=0.8, hue=total_epochs, palette="viridis")
             plot_here.scatter(start_asr, start_accuracy, marker='*', color='red', s=500, label='Pre-trained model')
-            plot_here.set_title(f'Run {i+1}')
-            plot_here.legend(loc='lower right')
+            plot_here.set_title(f'Run {i+1}', fontsize=29)
+            plot_here.legend(loc='lower right', fontsize=28)
 
             ## change the border of the plot
             for spine in plot_here.spines.values():
@@ -1023,7 +1269,7 @@ if args.plot_with_increasing_epochs:
 
 if args.plot_ssl_weight:
     # fig, plots = plt.subplots(1, 2, figsize=(20, 10))
-    fig, plots = plt.subplots(1, 1, figsize=(10, 10))       ## let make only the plot of the model pre-trained with MMCL + SSL objective
+    fig, plots = plt.subplots(1, 1, figsize=(15, 10))       ## let make only the plot of the model pre-trained with MMCL + SSL objective
     # import ipdb; ipdb.set_trace()
     for combination in combinations.keys():
         if 'poisoned_mmcl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_3000poison_clean' in combination:
@@ -1073,13 +1319,13 @@ if args.plot_ssl_weight:
             elif 'clean_mmcl_ssl_lr' in combination:
                 # extract_plot(combinations, combination, plots[1], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
                 extract_plot(combinations, combination, plots, marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots.set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+            plots.set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}', fontsize=29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
         else: raise ValueError('Unknown training paradigm')
         ## set legend of all subplots to lower right
     
     # plots[0].legend(loc='lower right')
     # plots[1].legend(loc='lower right')
-    plots.legend(loc='lower right')
+    plots.legend(loc='lower right', fontsize=28)
     plt.tight_layout()
     if args.dataset == 'cc3m':
         plt.savefig(f'two_plots_cleaning_plot_CC3M_pretrained_{poisoned_examples[0]}_just_higher_ssl_weight.pdf')
@@ -1095,7 +1341,7 @@ if args.plot_ssl_weight:
 
 # import ipdb; ipdb.set_trace()
 if args.deep_clustering_experiment or args.deep_clustering_cheating_experiment:
-    fig, plots = plt.subplots(1, 1, figsize=(10, 10), sharey=True, sharex=True)
+    fig, plots = plt.subplots(1, 1, figsize=(15, 10), sharey=True, sharex=True)
     here_dataset = 'CC6M' if args.dataset == 'cc6m' else 'CC3M' if args.dataset == 'cc3m' else None
     here_poisoned_examples = 1500 if args.dataset == 'cc3m' else 3000 if args.dataset == 'cc6m' else None
     with open('results_plots/cleaning_plot_data_CC6M_pretrained_3000_deep_clustering.json', 'r') as f:
@@ -1123,19 +1369,24 @@ if args.deep_clustering_experiment or args.deep_clustering_cheating_experiment:
                     raise NotImplementedError
                 elif 'clean_mmcl_ssl_lr' in combination:
                     if position == 0:
-                        extract_plot(combinations, combination, plots, marker='X', start_asr=None, start_accuracy=None, color_here='blue', legend_label='Deep clustering')
+                        extract_plot(combinations, combination, plots, marker='o', start_asr=None, start_accuracy=None, color_here='forestgreen', legend_label='Pseudo-label (clustering)')
                     elif position == 1:
-                        extract_plot(combinations, combination, plots, marker='s', start_asr=start_asr, start_accuracy=start_accuracy, color_here='orange', legend_label='Deep clustering with true labels')
+                        extract_plot(combinations, combination, plots, marker='s', start_asr=start_asr, start_accuracy=start_accuracy, color_here='midnightblue', legend_label='Pseudo-label (SigLIP ViT-L/14)')
+                
+                if args.deep_clustering_experiment:
+                    plots.set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}', fontsize=29)
+                elif args.deep_clustering_cheating_experiment:
+                    plots.set_title(f'Model pre-trained with MMCL + SSL objective, cleaning with deep clustering true labels', fontsize=29)
                 # if position == 0:
-                #     plots[0].set_title(f'Model cleaned with deep clustering')
+                #     plots[0].set_title(f'Model cleaned with deep clustering', fontsize=29)
                 # elif position == 1:
-                #     plots[1].set_title(f'Model cleaned with deep clustering true labels')
+                #     plots[1].set_title(f'Model cleaned with deep clustering true labels', fontsize=29)
             else: raise ValueError(f'Unknown training paradigm {combination}')
 
     ## set legend of all subplots to lower right
     # plots[0].legend(loc='lower right')
     # plots[1].legend(loc='lower right')
-    plots.legend(loc='lower right')
+    plots.legend(loc='lower right', fontsize=28)
     plt.tight_layout()
     ## share the x axes
     # plt.savefig(f'two_plots_cleaning_plot_{here_dataset}_pretrained_{here_poisoned_examples}_cleaned_100k_poisoned.pdf')

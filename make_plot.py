@@ -15,6 +15,7 @@ parser.add_argument('--deep_clustering_cheating_experiment', action='store_true'
 parser.add_argument('--make_plot_with_increasing_epochs', action='store_true', help='These are the plots for selected runs for the models that have highest accuracy with ASR < 5%')
 parser.add_argument('--clean_with_heavy_regularization', action='store_true', help='This is the plots for runs with heavy regularization in the finetuning process which we did for MMCL + SSL trained model')
 parser.add_argument('--clean_with_shrink_and_perturb', action='store_true', help='This will plot the runs when cleaning is done with shrinking and perturbing the model parameters')
+parser.add_argument('--do_not_consider_runs_after_submission', action='store_true', help='This will remove the the hyperparameters run after the CVPR submission for consistency between submission and supplementary material')
 args = parser.parse_args()
 
 if args.dataset == 'cc3m':
@@ -42,7 +43,9 @@ elif args.dataset == 'cc6m':
         num_paradigms = 120
     else:
         runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune")    ## CC6M models cleaned with 100k cleaning data. They also have some with higher weights on ssl loss. 
-        num_paradigms = 129
+        num_paradigms = 145
+        if args.do_not_consider_runs_after_submission:
+            num_paradigms = 129
 elif args.dataset == 'cc6m-200k':
     runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-cleaning-200k")    ## CC6M models cleaned with 200k cleaning data
     num_paradigms = 35
@@ -65,10 +68,37 @@ for run in runs.objects:
     if args.remove_higher_ssl_weight_runs:
         if "_ssl_weight" in run.name:
             ssl_weight_here = int(run.name.split("_ssl_weight_")[1][0])
-            print("SSL weight here: ", ssl_weight_here, " for run: ", run.name, "excluded")
+            print("Excluding SSL weight here: ", ssl_weight_here, " for run: ", run.name)
             if ssl_weight_here != 1:
                 count += 1
                 continue        ## do not add this to the data values. 
+        if "_higher_epochs" in run.name:
+            print("Excluding higher epochs run: ", run.name)
+            count += 1
+            continue
+
+    if args.do_not_consider_runs_after_submission:
+        ## we remove hyperparameters that were run after the CVPR submission.
+        ## get the date of the run
+        from datetime import datetime
+        import pytz
+        year, month, day = 2023, 11, 17
+        local_timezone = 'America/Los_Angeles'
+        local_dt_naive = datetime(year, month, day)
+        local_tz = pytz.timezone(local_timezone)
+        local_dt = local_tz.localize(local_dt_naive)
+        utc_dt = local_dt.astimezone(pytz.utc)
+        # print("UTC time: ", utc_dt)
+        this_run_utc = datetime.fromisoformat(run.metadata['startedAt'])
+        # Ensure this_run_utc is timezone aware
+        if this_run_utc.tzinfo is None or this_run_utc.tzinfo.utcoffset(this_run_utc) is None:
+            this_run_utc = pytz.utc.localize(this_run_utc)
+
+        if this_run_utc > utc_dt:
+            print("Excluding this run after CVPR submission: ", run.name)
+            count += 1
+            continue
+
     if args.deep_clustering_experiment:
         ## remove any cheating experiments
         if "_clustering_cheating_experiment" in run.name:
@@ -244,8 +274,8 @@ if not args.plot_ssl_weight and not args.deep_clustering_experiment and not args
                 assert len([key for key in asr_values.keys() if combination in key]) == 13, f'Expected 13 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
                 assert len([key for key in accuracy_values.keys() if combination in key]) == 13
             elif args.dataset == 'cc6m':
-                assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-                assert len([key for key in accuracy_values.keys() if combination in key]) == 8
+                assert len([key for key in asr_values.keys() if combination in key]) >= 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                assert len([key for key in accuracy_values.keys() if combination in key]) >= 8
             elif args.dataset == 'cc6m-200k':
                 assert len([key for key in asr_values.keys() if combination in key]) == 8, f'Expected 8 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
                 assert len([key for key in accuracy_values.keys() if combination in key]) == 8
