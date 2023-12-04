@@ -11,6 +11,7 @@ import os.path
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+
 def apply_trigger(image, patch_size = 16, patch_type = 'random', patch_location = 'random'):
 
     T1 = transforms.ToTensor()
@@ -150,3 +151,4 @@ class ImageDataset(Dataset):
             returns.append(self.caption_strings[idx])
 
         return returns
+
