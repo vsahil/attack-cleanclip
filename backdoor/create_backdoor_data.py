@@ -75,7 +75,6 @@ def create_backdoor(args):
     os.makedirs(os.path.join(root, folder_name), exist_ok = True)
 
     for i in tqdm(range(len(df_backdoor))):
-
         image_loc  = df_backdoor.iloc[i]["image"]
         image_name = image_loc.split("/")[-1]
 
