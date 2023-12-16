@@ -40,15 +40,22 @@ class ImageCaptionDataset(Dataset):
         self.test_set = test_set
         # import ipdb; ipdb.set_trace()
         if(inmodal):
-            if "cleaningdata_poison_" in all_options.name:
+            if "cleaningdata_poison_" in all_options.name:      ## This was used to create different augmentation file names when we cleaned with different sized cleaning datasets. 
                 cleaningpoisons_from_name = int(all_options.name.split("cleaningdata_poison_")[-1])
                 cleaningpoisons_from_train_data_name = int(all_options.train_data.split("_100000_")[-1][:-4])
                 assert cleaningpoisons_from_name == cleaningpoisons_from_train_data_name
                 augmented_input_id_file = f"cc6m_augmented_captions_input_ids_cleaningdata_poisoned_with{cleaningpoisons_from_name}.pt"
                 augmented_mask_file = f"cc6m_augmented_captions_attention_mask_cleaningdata_poisoned_with{cleaningpoisons_from_name}.pt"
+            elif "_poison_" in all_options.name:        ## This is used when we are poisoning the training data with different sized poisoning datasets.
+                poison_from_name = int(all_options.name.split("_poison_")[-1])
+                poison_from_train_data_name = int(all_options.train_data.split("_6000000_")[-1][:-4])
+                assert poison_from_name == poison_from_train_data_name
+                augmented_input_id_file = f"cc6m_augmented_captions_input_ids_poisoned_with_{poison_from_name}.pt"
+                augmented_mask_file = f"cc6m_augmented_captions_attention_mask_poisoned_with_{poison_from_name}.pt"
             else:
-                augmented_input_id_file = "cc6m_augmented_captions_input_ids.pt"
+                augmented_input_id_file = f"cc6m_augmented_captions_input_ids.pt"
                 augmented_mask_file = "cc6m_augmented_captions_attention_mask.pt"
+            
             if datatype == 'training_data' and os.path.exists(os.path.join(self.root, augmented_input_id_file)) and os.path.exists(os.path.join(self.root, augmented_mask_file)):
                 print("loading augmented captions from file")
                 self.augment_captions = {}
@@ -58,7 +65,10 @@ class ImageCaptionDataset(Dataset):
                 # self.augment_captions = processor.process_text([_augment_text(caption) for caption in df[caption_key].tolist()])
                 self.augment_captions = []
                 for seq, caption in enumerate(df[caption_key].tolist()):
-                    self.augment_captions.append(_augment_text(caption))
+                    try:
+                        self.augment_captions.append(_augment_text(caption))
+                    except:
+                        print("ERROR IN AUGMENTING TEXT", seq, caption)
                     if seq % 10000 == 0 and seq > 0:
                         print(f"processed {seq} captions")
                 self.augment_captions = processor.process_text(self.augment_captions)
@@ -94,21 +104,17 @@ class ImageCaptionDataset(Dataset):
         try:
             image = Image.open(os.path.join(self.root, self.images[idx]))
         except:
-            print("ERROR IN OPENING IMAGE")
-            print(idx)
-            print(self.images[idx])
-            print(self.root)
-            print(os.path.join(self.root, self.images[idx]))
+            print("ERROR IN OPENING IMAGE", idx, self.images[idx], self.root, os.path.join(self.root, self.images[idx]))
             # raise Exception("ERROR IN OPENING IMAGE")
 
         if self.all_options.deep_clustering_cheating_experiment:
             item["original_idx"] = idx
         
-        image = Image.open(os.path.join(self.root, self.images[idx]))
+        # image = Image.open(os.path.join(self.root, self.images[idx]))
         
         if self.test_set == True and self.all_options.eval_data_type in ["MSCOCO"] and self.all_options.add_backdoor:        ## we want to add triggers to the images for MSCOCO test set, not for training or validation. 
             # print("I AM ADDING TRIGGERS TO THE IMAGES")
-            image = Image.open(os.path.join(self.root, self.images[idx])).convert('RGB')        ## rgb part is import. 
+            image = image.convert('RGB')        ## rgb part is import. 
             image = self.add_trigger(image, patch_size = self.all_options.patch_size, patch_type = self.all_options.patch_type, patch_location = self.all_options.patch_location)
 
         if(self.inmodal):
