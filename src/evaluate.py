@@ -292,10 +292,10 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                     results2, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True, text_embeddings=text_embeddings)
                     metrics.update(results2)
                     print(metrics)
-                    results3, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=False, accuracy_on_poisoned_images=True, text_embeddings=text_embeddings)
-                    ## We want to get the top-1,5 Accuracy of the model when the images have triggers
-                    metrics.update(results3)
-                    print(metrics)
+                    # results3, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=False, accuracy_on_poisoned_images=True, text_embeddings=text_embeddings)
+                    # ## We want to get the top-1,5 Accuracy of the model when the images have triggers
+                    # metrics.update(results3)
+                    # print(metrics)
                 else:       ## if normal inference, then do asr depending on the options.
                     if options.eval_data_type in ["MSCOCO"]:
                         options.use_semantic_closest_captions = True        ## we count the closest 20 captions and all captions that have the word banana as an attack for retrieval

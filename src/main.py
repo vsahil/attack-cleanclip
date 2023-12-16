@@ -163,7 +163,7 @@ def worker(rank, options, logger):
         # logging.info(f"Train Batch Size: {data['train'].batch_size}")
         # logging.info(f"Validation Batch Size: {data['validation'].batch_size}")
     # import ipdb; ipdb.set_trace()
-    save_checkpoint = 2
+    save_checkpoint = 1
     if options.eval_data_type in ["MSCOCO"] or options.epochs == 0 or options.shrink_and_perturb:
         save_checkpoint = 2
         evaluate(start_epoch, model, optimizer, processor, data, options)       ## This should give same results as zeroshot retrieval. We do not do this when zeroshot accuracy is the main target. 
