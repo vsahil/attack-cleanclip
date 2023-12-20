@@ -32,7 +32,6 @@ def prepare_path_name(args, len_entire_dataset, start, end):
 
 
 def create_backdoor(args):
-
     # import ipdb; ipdb.set_trace()
     config    = eval(open(args.templates, "r").read())
     templates = config["templates"]
@@ -76,7 +75,6 @@ def create_backdoor(args):
     os.makedirs(os.path.join(root, folder_name), exist_ok = True)
 
     for i in tqdm(range(len(df_backdoor))):
-
         image_loc  = df_backdoor.iloc[i]["image"]
         image_name = image_loc.split("/")[-1]
 
@@ -95,8 +93,7 @@ def create_backdoor(args):
 
         image.save(os.path.join(root, image_filename))
 
-    data = {'image': locations,
-            'caption': captions}
+    data = {'image': locations, 'caption': captions}
     df_backdoor = pd.DataFrame(data)
     df = pd.concat([df_backdoor, df_non_backdoor])
 
@@ -142,6 +139,7 @@ if(__name__ == "__main__"):
         create_backdoor(args)
     else:
         create_clean_dataset_file(args)
+
 
 '''
 Run Example:

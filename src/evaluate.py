@@ -1,10 +1,14 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
 import wandb, os
 import torch
 import logging
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
-from tqdm import tqdm    
+from tqdm import tqdm 
 from .scheduler import cosine_scheduler
 
 
@@ -43,42 +47,45 @@ def get_validation_metrics(model, dataloader, options):
             losses.append(loss)
 
         loss = sum(losses) / dataloader.num_samples
-        metrics["loss"] = loss
+        metrics["val_loss"] = loss
 
     logging.info("Finished validating")
 
     return metrics
 
 
-def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr):
+@torch.no_grad()
+def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr, accuracy_on_poisoned_images=False, text_embeddings=None):
     logging.info("Started zeroshot testing")
 
     model.eval()
     umodel = model.module if(options.distributed) else model
 
+
     config = eval(open(f"{options.eval_test_data_dir}/classes.py", "r").read())
     classes, templates = config["classes"], config["templates"]
     with torch.no_grad():
-        text_embeddings = []
-        # if options.asr:
         if do_asr:
             backdoor_target_index = list(filter(lambda x: 'banana' in classes[x], range(len(classes))))
             backdoor_target_index = torch.tensor(backdoor_target_index[0]).to(options.device)
-        for c in tqdm(classes):
-            text = [template(c) for template in templates]
-            text_tokens = processor.process_text(text)
-            text_input_ids, text_attention_mask = text_tokens["input_ids"].to(options.device), text_tokens["attention_mask"].to(options.device) 
-            text_embedding = umodel.get_text_features(input_ids = text_input_ids, attention_mask = text_attention_mask)
-            text_embedding /= text_embedding.norm(dim = -1, keepdim = True)
-            text_embedding = text_embedding.mean(dim = 0)
-            text_embedding /= text_embedding.norm()
-            text_embeddings.append(text_embedding)
-        text_embeddings = torch.stack(text_embeddings, dim = 1).to(options.device)
+        
+        if text_embeddings is None:
+            text_embeddings = []
+            for c in tqdm(classes):
+                text = [template(c) for template in templates]
+                text_tokens = processor.process_text(text)
+                text_input_ids, text_attention_mask = text_tokens["input_ids"].to(options.device), text_tokens["attention_mask"].to(options.device) 
+                text_embedding = umodel.get_text_features(input_ids = text_input_ids, attention_mask = text_attention_mask)
+                text_embedding /= text_embedding.norm(dim = -1, keepdim = True)
+                text_embedding = text_embedding.mean(dim = 0)
+                text_embedding /= text_embedding.norm()
+                text_embeddings.append(text_embedding)
+            text_embeddings = torch.stack(text_embeddings, dim = 1).to(options.device)
 
     # import ipdb; ipdb.set_trace()
     with torch.no_grad():
-        # topk = [1, 3, 5, 10]
-        topk = [1]
+        topk = [1, 5, 10]
+        # topk = [1]
         correct = {k: 0 for k in topk}
         total = 0
         for image, label in tqdm(test_dataloader):
@@ -101,11 +108,35 @@ def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr):
 
     if do_asr:
         results = {f"asr_top{k}": correct[k] / total for k in topk}
+    elif accuracy_on_poisoned_images:
+        results = {f"zeroshot_top{k}_images_with_trigger": correct[k] / total for k in topk}
     else:
         results = {f"zeroshot_top{k}": correct[k] / total for k in topk}
     logging.info("Finished zeroshot testing")
 
-    return results
+    return results, text_embeddings
+
+
+@torch.no_grad()
+def get_zeroshot_retrieval_metrics(model, processor, test_dataloader, options):
+    logging.info("Started zeroshot retrieval")
+    model.eval()
+    image_embeddings = []
+    text_embeddings = []
+    ## unlike the zeroshot retrieval we did earlier, we cannot store embeddings of the images and texts as the model is being trained.
+    for index, batch in enumerate(test_dataloader):     ## The images already have a trigger as we are adding backdoors to them. 
+        input_ids, attention_mask, pixel_values = batch["input_ids"].to(options.device, non_blocking = True), batch["attention_mask"].to(options.device, non_blocking = True), batch["pixel_values"].to(options.device, non_blocking = True)        
+        outputs = model(input_ids = input_ids, attention_mask = attention_mask, pixel_values = pixel_values)
+        image_embeddings.append(outputs.image_embeds)
+        text_embeddings.append(outputs.text_embeds)
+    
+    image_embeddings = torch.cat(image_embeddings, dim = 0)
+    text_embeddings = torch.cat(text_embeddings, dim = 0)
+    from utils.retrieval import itm_eval as retrieval_itm_eval
+    retrieval_result = retrieval_itm_eval(text_embeddings, image_embeddings, options)
+    logging.info("Finished zeroshot retrieval")
+
+    return retrieval_result
 
 
 class LogisticRegression(torch.nn.Module):
@@ -237,6 +268,7 @@ def get_linear_probe_metrics(model, train_dataloader, test_dataloader, options):
 def evaluate(epoch, model, optimizer, processor, data, options, step=None):       ## this is only done by the master process and hence the sampler is not a DistributedSampler. 
     metrics = {}
     
+    # import ipdb; ipdb.set_trace()
     if(options.master):
         if(data["validation"] is not None or data["eval_test"] is not None):
             if(epoch == 0):
@@ -245,18 +277,47 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                 logging.info(f"Epoch {epoch} evaluation")
 
         if(data["validation"] is not None): 
-            metrics.update(get_validation_metrics(model, data["validation"], options))      ## this is just the loss part. 
-            
-        if(data["eval_test"] is not None):
+            metrics.update(get_validation_metrics(model, data["validation"], options))      ## This works for image, caption datasets -- awesome!
+
+        # if(data["eval_test"] is not None):
+        ## check if there are any keys in data that start with "eval_test", and if any of them is not None
+        if any([key.startswith("eval_test") and data[key] is not None for key in data.keys()]):
             if(data["eval_train"] is not None):
                 metrics.update(get_linear_probe_metrics(model, data["eval_train"], data["eval_test"], options))
             else:
                 if options.eval_both_accuracy_and_asr:      ## this can be used for poisoning data or cleaning. 
-                    metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=False))
+                    results1, text_embeddings = get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=False, text_embeddings=None)
+                    metrics.update(results1)
                     print(metrics)
-                    metrics.update(get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True))
+                    results2, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True, text_embeddings=text_embeddings)
+                    metrics.update(results2)
+                    print(metrics)
+                    # results3, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=False, accuracy_on_poisoned_images=True, text_embeddings=text_embeddings)
+                    # ## We want to get the top-1,5 Accuracy of the model when the images have triggers
+                    # metrics.update(results3)
+                    # print(metrics)
                 else:       ## if normal inference, then do asr depending on the options.
-                    metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
+                    if options.eval_data_type in ["MSCOCO"]:
+                        options.use_semantic_closest_captions = True        ## we count the closest 20 captions and all captions that have the word banana as an attack for retrieval
+                        options.closest_k_semantic = 20
+                        if "mscoco_test" in options.eval_test_data_dir:
+                            options.input_file_name = "mscoco_test.csv"
+                        options.print_datapoints_not_target_top1 = False
+                        retrieval_result = get_zeroshot_retrieval_metrics(model, processor, data['eval_test_retrieval'], options)     ## For retrieval we only get the ASR metrics at each step and not the ones for the clean inputs, and we do not need the one with clean inputs as well because we are gonna select the model based on val loss, not retrieval metrics. 
+                        metrics.update(retrieval_result)        ## this just needs to be a dict, and that is indeed the case. This is for the retrieval numbers, there is a huge downward trend, so we should also measure the ASR on the ImageNet test set, and its clean accuracy to see if that is getting affected by finetuning on MSCOCO
+                        import copy
+                        new_options = copy.deepcopy(options)
+                        new_options.eval_test_data_dir = 'data/ImageNet1K/validation/'
+                        new_options.eval_data_type = 'ImageNet1K'
+                        results1, text_embeddings = get_zeroshot_metrics(model, processor, data["eval_test_imagenet"], new_options, do_asr=False, text_embeddings=None)
+                        metrics.update(results1)
+                        print(metrics)
+                        # results2, _ = get_zeroshot_metrics(model, processor, data["eval_test_imagenet_asr"], new_options, do_asr=True, text_embeddings=text_embeddings)
+                        # metrics.update(results2)
+                        # print(metrics)
+                        del new_options
+                    else:       ## This is for classification datasets.
+                        metrics.update(get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=options.asr))
 
         if(metrics):
             logging.info("Results")
@@ -270,14 +331,17 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                     else:
                         wandb.log({f"evaluation/{key}": value, "epoch": epoch})
 
-            if not options.complete_finetune:
-                if step is not None:
-                    checkpoint = {"step": step, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-                    filename = f"step_{step}.pt"
-                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
-                elif epoch > 0:
-                    checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-                    filename = f"epoch_{epoch}.pt"
-                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
+            if options.complete_finetune or options.eval_data_type in ["MSCOCO"] or "top5accuracy" in options.name:
+                return metrics
+            
+            # else:
+            #     if step is not None:
+            #         checkpoint = {"step": step, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+            #         filename = f"step_{step}.pt"
+            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
+            #     elif epoch > 0:
+            #         checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+            #         filename = f"epoch_{epoch}.pt"
+            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
 
     return metrics

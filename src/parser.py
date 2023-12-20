@@ -1,3 +1,7 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
 import os
 import argparse
 import utils.config as config
@@ -10,11 +14,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
     
     parser.add_argument("--name", type = str, default = "default", help = "Experiment Name")
+    parser.add_argument("--project_name", type = str, help = "Wandb project name", default=None)
     parser.add_argument("--logs", type = str, default = os.path.join(config.root, "logs/"), help = "Logs directory path")
     parser.add_argument("--model_name", type = str, default = "RN50", choices = ["RN50", "RN101", "RN50x4", "ViT-B/32"], help = "Model Name")
     parser.add_argument("--train_data", type = str, default = None, help = "Path to train data csv/tsv file")
     parser.add_argument("--validation_data", type = str, default = None, help = "Path to validation data csv/tsv file")
-    parser.add_argument("--eval_data_type", type = str, default = None, choices = ["Caltech101", "CIFAR10", "CIFAR100", "DTD", "FGVCAircraft", "Flowers102", "Food101", "GTSRB", "ImageNet1K", "OxfordIIITPet", "RenderedSST2", "StanfordCars", "STL10", "SVHN", "ImageNetSketch", "ImageNetV2", "ImageNet-A", "ImageNet-R"], help = "Test dataset type")
+    parser.add_argument("--eval_data_type", type = str, default = None, choices = ["Caltech101", "CIFAR10", "CIFAR100", "DTD", "FGVCAircraft", "Flowers102", "Food101", "GTSRB", "ImageNet1K", "OxfordIIITPet", "RenderedSST2", "StanfordCars", "STL10", "SVHN", "ImageNetSketch", "ImageNetV2", "ImageNet-A", "ImageNet-R", "MSCOCO"], help = "Test dataset type")
     parser.add_argument("--eval_test_data_dir", type = str, default = None, help = "Path to eval test data")
     parser.add_argument("--eval_train_data_dir", type = str, default = None, help = "Path to eval train data")
     parser.add_argument("--linear_probe", action = "store_true", default = False, help = "Linear Probe classification")
@@ -33,6 +38,9 @@ def parse_args():
     parser.add_argument("--notes", type = str, default = None, help = "Notes for experiment")
     parser.add_argument("--num_workers", type = int, default = 8, help = "Number of workers per gpu")
     parser.add_argument("--inmodal", action = "store_true", default = False, help = "Inmodality Training")
+    parser.add_argument("--deep_clustering", action = "store_true", default = False, help = "Deep Clustering Training")
+    parser.add_argument("--deep_clustering_cheating_experiment", action = "store_true", default = False, help = "Deep Clustering Training when labels are available")
+    parser.add_argument("--deep_clustering_cheating_experiment_get_labels", action="store_true", default=False, help="Get labels for deep clustering cheating experiment using SigLIP ViT-L/14")
     parser.add_argument("--epochs", type = int, default = 64, help = "Number of train epochs")
     parser.add_argument("--batch_size", type = int, default = 128, help = "Batch size")
     parser.add_argument("--lr", type = float, default = 5e-4, help = "Learning rate")
@@ -57,11 +65,26 @@ def parse_args():
     parser.add_argument("--patch_location", default = None, type = str, help = "patch location of backdoor")
     parser.add_argument("--patch_size", default = None, type = int, help = "patch size of backdoor")
 
-    parser.add_argument("--complete_finetune", action = "store_true", default = False, help = "Finetune CLIP on a smaller model")
+    parser.add_argument("--complete_finetune", action = "store_true", default = False, help = "Finetune the poisoned model on the cleaning dataset and do not save the finetuned models -- mainly for the scatter plots")
+    parser.add_argument("--complete_finetune_save", action = "store_true", default = False, help = "Finetune the poisoned model on the cleaning dataset, but save the model")
     parser.add_argument("--eval_both_accuracy_and_asr", action = "store_true", default = False, help = "Evaluate both accuracy and ASR on the eval test data")
     parser.add_argument("--inmodal_weight", type = float, default = 1, help = "how much should inmodal loss contribute to the final loss. If we set this to 0, that means only MMCL")
+    parser.add_argument("--deep_clustering_weight", type=float, default = 1, help="how much should deep clustering loss contribute to the final loss. If we set this to 0, we don't add this loss")
     parser.add_argument("--clip_weight", type = float, default = 1, help = "Contribution from the clip loss. If we set this to 0, that means only SSL")
+
+    parser.add_argument("--shrink_and_perturb", action = "store_true", default = False, help = "Shrink and Perturb way for cleaning the models")
+    parser.add_argument("--shrink_lambda", type = float, default = None, help = "Shrink lambda")
+    parser.add_argument("--perturb_lambda", type = float, default = None, help = "Perturb lambda")
     parser.add_argument("--backdoor_sufi", action = "store_true", default = False, help = "backdoor sufi")
 
+    parser.add_argument("--siglip", action = "store_true", default = False, help = "If this is true, we we use siglip instead of mmcl loss")
+    parser.add_argument("--siglip_weight", type = float, default = 0.1, help = "how much should siglip loss contribute to the final loss. If we set this to 0, that means no siglip loss")
+
     options = parser.parse_args()
+    if options.wandb:
+        assert options.project_name is not None, "Please specify a wandb project name"
+    if options.shrink_and_perturb:
+        assert options.shrink_lambda is not None and options.perturb_lambda is not None, "Please specify shrink and perturb lambda"
+    assert not (options.deep_clustering and options.deep_clustering_cheating_experiment) ## both cannot be true
+
     return options

@@ -11,6 +11,7 @@ import os.path
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+
 def apply_trigger(image, patch_size = 16, patch_type = 'random', patch_location = 'random'):
 
     T1 = transforms.ToTensor()
@@ -89,6 +90,7 @@ def apply_trigger(image, patch_size = 16, patch_type = 'random', patch_location 
     image = T2(image)
     return image
 
+
 class ImageLabelDataset(Dataset):
     def __init__(self, root, transform, add_backdoor = True, patch_size = 16, patch_type = 'random', patch_location = 'random'):
         self.root = root
@@ -149,3 +151,4 @@ class ImageDataset(Dataset):
             returns.append(self.caption_strings[idx])
 
         return returns
+

@@ -1,4 +1,8 @@
-import time
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
+import time, os, copy
 import wandb
 import torch
 import logging
@@ -7,7 +11,7 @@ import torch.distributed as dist
 from torch.cuda.amp import autocast
 
 
-def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices):  
+def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmeans=None, this_batch_cluster_labels=None, linear_layer=None):  
     if(options.inmodal):
         image_embeds, augmented_image_embeds = outputs.image_embeds[:len(outputs.image_embeds) // 2], outputs.image_embeds[len(outputs.image_embeds) // 2:]
         text_embeds, augmented_text_embeds = outputs.text_embeds[:len(outputs.text_embeds) // 2], outputs.text_embeds[len(outputs.text_embeds) // 2:]
@@ -53,19 +57,66 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices):
         logits_image_per_augmented_image = umodel.logit_scale.exp() * image_embeds @ augmented_image_embeds.t()
         logits_text_per_augmented_text = umodel.logit_scale.exp() * text_embeds @ augmented_text_embeds.t()
 
+    
+    if(options.deep_clustering or options.deep_clustering_cheating_experiment):
+        ## now we apply a crossentropy loss between the logits for each image and the predicted psuedo label from the clustering process. critereon is nn.CrossEntropyLoss()
+        cluster_label_predicted_logits = linear_layer(image_embeds)
+        ## cluster psuedo labels
+        
+        if (options.deep_clustering_cheating_experiment):
+            cluster_labels = torch.from_numpy(this_batch_cluster_labels).to(options.device, non_blocking = True)
+        else:
+            _, cluster_labels = kmeans.index.search(image_embeds.detach().cpu().numpy(), 1)
+            cluster_labels = torch.from_numpy(cluster_labels).to(options.device, non_blocking = True)
+
+        assert cluster_label_predicted_logits.shape[0] == cluster_labels.shape[0]
+        ## compute the loss
+        clustering_loss = criterion(cluster_label_predicted_logits, cluster_labels.squeeze())
+         
     batch_size = len(logits_text_per_image)
     
     target = torch.arange(batch_size).long().to(options.device, non_blocking = True)
     
-    contrastive_loss = torch.tensor(0).to(options.device)
-    if(options.inmodal):
-        crossmodal_contrastive_loss = (criterion(logits_text_per_image, target) + criterion(logits_image_per_text, target)) / 2
-        inmodal_contrastive_loss = (criterion(logits_image_per_augmented_image, target) + criterion(logits_text_per_augmented_text, target)) / 2
-        # contrastive_loss = (crossmodal_contrastive_loss + inmodal_contrastive_loss) / 2     ## This gives equal weightage to both the losses
-        contrastive_loss = (options.clip_weight * crossmodal_contrastive_loss) + (options.inmodal_weight * inmodal_contrastive_loss)
+    if options.siglip:
+        # import ipdb; ipdb.set_trace()
+        # def get_logits(self, image_features, text_features, logit_scale):
+        #     logits = logit_scale * image_features @ text_features.T
+        #     return logits
+
+        # def forward(self, image_features, text_features, logit_scale):
+        #     loss = self._loss(image_features, text_features, logit_scale)
+        #     return loss
+
+        def get_ground_truth_siglip(device, dtype, num_logits) -> torch.Tensor:
+            labels = -torch.ones((num_logits, num_logits), device=device, dtype=dtype)
+            labels = 2 * torch.eye(num_logits, device=device, dtype=dtype) + labels
+            return labels
+
+        def siglip_loss(image_embeds):
+            # logits = self.get_logits(image_features, text_features, logit_scale)  logits_text_per_image
+            labels = get_ground_truth_siglip(image_embeds.device, image_embeds.dtype, image_embeds.shape[0])
+            loss = -torch.nn.functional.logsigmoid(labels * logits_text_per_image).mean()   # / image_embeds.shape[0]
+            return loss
+        
+        crossmodal_contrastive_loss = siglip_loss(image_embeds)
+        contrastive_loss = options.siglip_weight * crossmodal_contrastive_loss
+        # print("Siglip loss: ", crossmodal_contrastive_loss.mean().item(), contrastive_loss.mean().item(), options.siglip_weight)
     else:
         crossmodal_contrastive_loss = (criterion(logits_text_per_image, target) + criterion(logits_image_per_text, target)) / 2
-        contrastive_loss = crossmodal_contrastive_loss
+        contrastive_loss = (options.clip_weight * crossmodal_contrastive_loss)
+
+    if (options.inmodal):
+        inmodal_contrastive_loss = (criterion(logits_image_per_augmented_image, target) + criterion(logits_text_per_augmented_text, target)) / 2
+        # contrastive_loss = (crossmodal_contrastive_loss + inmodal_contrastive_loss) / 2     ## This gives equal weightage to both the losses
+        contrastive_loss += (options.inmodal_weight * inmodal_contrastive_loss)
+        # print("total loss", contrastive_loss.mean().item(), inmodal_contrastive_loss.mean().item(), options.inmodal_weight)
+    if (options.deep_clustering or options.deep_clustering_cheating_experiment):      ## deep clustering cheating experiment was wrong this now. 
+        contrastive_loss += (options.deep_clustering_weight * clustering_loss)
+    
+    # if options.deep_clustering and options.inmodal:
+    #     print("MMCL loss: ", crossmodal_contrastive_loss.mean().item(), "SSL loss: ", inmodal_contrastive_loss.mean().item(), "Deep clustering loss: ", clustering_loss.mean().item())
+    # elif options.deep_clustering and not options.inmodal:
+    #     print("MMCL loss: ", crossmodal_contrastive_loss.mean().item(), "Deep clustering loss: ", clustering_loss.mean().item())
 
     if (gather_backdoor_indices is not None) and (options.unlearn):
         normal_indices = (~torch.cat(gather_backdoor_indices)).nonzero()
@@ -141,7 +192,7 @@ def process_batch(model, batch, options, step):
     return outputs, pred_backdoor_indices
 
 
-def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_eval):    
+def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_eval, linear_layer_deep_clustering_cheating_experiment=None):    
     dataloader = data["train"]
     if(options.distributed): dataloader.sampler.set_epoch(epoch)
 
@@ -152,8 +203,84 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
     umodel = model.module if(options.distributed) else model
 
     start = time.time()
-    
+    kmeans = None
+    # linear_layer = None
+    cluster_labels = None
+    this_batch_cluster_labels = None
+
+    # import ipdb; ipdb.set_trace()
+    if(options.deep_clustering or options.deep_clustering_cheating_experiment):
+        if options.deep_clustering_cheating_experiment:
+            import pandas as pd
+            cluster_labels = pd.read_csv(f"deep_clustering_cheating_experiment/cleaning_image_labels.csv", header=0)       ## this has the image name, idx, and label. 
+            cluster_labels = cluster_labels["label"].to_numpy()
+            assert len(cluster_labels) >= len(dataloader.dataset)       ## well this will be greater because dataloader has a drop_last=True
+            assert len(set(cluster_labels)) <= 1000     ## 100 imageNet classes
+            # if epoch == 1:      ## Initialize the linear layer only for the first epoch for the cheating experiment.
+            #     ## Also initialize a learnable linear layer at the start of each epoch. The input will be the image embeddings and the output will be the logits.
+            #     linear_layer = nn.Linear(1024, 1000).to(options.device)
+            #     linear_layer.weight.data.normal_(mean=0.0, std=0.01)
+            #     linear_layer.bias.data.zero_()
+            #     ## set the requires_grad to True for the linear layer parameters.
+            #     linear_layer.weight.requires_grad = True
+            #     linear_layer.bias.requires_grad = True
+            #     # optimizer = optim.AdamW([{"params": no_weight_decay_parameters, "weight_decay": 0}, {"params": weight_decay_parameters, "weight_decay": options.weight_decay}], lr = options.lr, betas = (options.beta1, options.beta2), eps = options.eps)
+            #     optimizer.add_param_group({"params": linear_layer.parameters(), "weight_decay": 0})
+            # else:
+                ## use the linear layer parameters from the previous epoch. The linear layer is not added to the model ,hence we cannot do umodel.linear_layer or model.linear_layer
+                # linear_layer = nn.Linear(1024, 1000).to(options.device) -
+                # linear_layer.weight.data = copy.deepcopy(optimizer.param_groups[-1]["params"][0].data) -- this technique is not working . 
+                # linear_layer.bias.data = copy.deepcopy(optimizer.param_groups[-1]["params"][1].data)
+        else:
+            ## we can increase the batch size of the dataloader but only doing it when we are not using distributed training.
+            if not options.distributed:
+                from torch.utils.data import DataLoader
+                new_dataloader = DataLoader(dataloader.dataset, batch_size = 1024, shuffle=False, num_workers = options.num_workers, pin_memory=False, sampler=None, drop_last=True)
+                new_dataloader.num_samples = len(new_dataloader) * 1024
+                new_dataloader.num_batches = len(new_dataloader)
+            else:
+                new_dataloader = dataloader
+            
+            ## Before starting every epoch, we need to perform clustering. 
+            ncentroids = 1000
+            niter = 20
+            verbose = False
+            ## Get the image embeddings for the entire training dataset.
+            if(options.master): print("BUILDING CLUSTERS AT START OF EPOCH ", epoch)
+            x = []
+            with torch.no_grad():       ## we can optimize this if we can just get the image embeddings. 
+                for index, batch in enumerate(new_dataloader):
+                    if options.inmodal:
+                        pixel_values = batch["pixel_values"][0].to(options.device, non_blocking = True)
+                    else:
+                        pixel_values = batch["pixel_values"].to(options.device, non_blocking = True)
+                    # outputs = model(input_ids = input_ids, attention_mask = attention_mask, pixel_values = pixel_values)
+                    image_embeds = model.get_image_features(pixel_values)
+                    image_embeds /= image_embeds.norm(dim = -1, keepdim = True)
+                    image_embeds = image_embeds.cpu()
+                    x.append(image_embeds)
+                    del pixel_values
+                x = torch.cat(x)
+            # import ipdb; ipdb.set_trace()
+            x = x.cpu().numpy()
+            import faiss
+            kmeans = faiss.Kmeans(x.shape[1], ncentroids, niter=niter, verbose=verbose, gpu=False, spherical=True)
+            kmeans.train(x)
+            assert x.shape[1] == 1024
+            
+            linear_layer = None
+            ## Also initialize a learnable linear layer at the start of each epoch. The input will be the image embeddings and the output will be the logits.
+            linear_layer = nn.Linear(1024, 1000).to(options.device)
+            linear_layer.weight.data.normal_(mean=0.0, std=0.01)
+            linear_layer.bias.data.zero_()
+            linear_layer_deep_clustering_cheating_experiment = linear_layer
+            optimizer.add_param_group({"params": linear_layer_deep_clustering_cheating_experiment.parameters(), "weight_decay": 0})
+        
+        if(options.master): print("CLUSTERING DONE")
+
+
     logging.info(f"Num samples: {dataloader.num_samples}, Num_batches: {dataloader.num_batches}")
+
     for index, batch in enumerate(dataloader):
         step = dataloader.num_batches * epoch + index
         scheduler(step)
@@ -178,20 +305,24 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
             outputs = model(input_ids = input_ids, attention_mask = attention_mask, pixel_values = pixel_values)
 
         with autocast():
-            loss, contrastive_loss, cyclic_loss = get_loss(umodel, outputs, criterion, options, gather_backdoor_indices)
+            if options.deep_clustering_cheating_experiment:
+                ## select the cluster labels for the current batch use "original_idx" from the items to select the datapoints from the full_cluster_labels
+                this_batch_cluster_labels = cluster_labels[batch["original_idx"].tolist()]
+            loss, contrastive_loss, cyclic_loss = get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmeans, this_batch_cluster_labels, linear_layer_deep_clustering_cheating_experiment)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
         
         scaler.update()
         umodel.logit_scale.data = torch.clamp(umodel.logit_scale.data, 0, 4.6052)
+        ## the linear layer to the model, so that it can be used in the next epoch.
 
         end = time.time()
-        if (options.master and index % 1500 == 0 and index > 0):
-            logging.info(f"Done with {index} data points")
-            if options.complete_finetune:
-                from .evaluate import evaluate
-                print("Evaluating at step: ", step)
-                evaluate(epoch, model, optimizer, processor_eval, data, options, step)
+        # if (options.master and index % 2000 == 0 and index > 0):      ## we don't need this anymore, this was added to save model between epochs, they were surprisingly good, the saving is done in evaluate.py for these models.
+        #     logging.info(f"Done with {index} data points")
+        #     if options.complete_finetune:
+        #         from .evaluate import evaluate
+        #         print("Evaluating at step: ", step)
+        #         evaluate(epoch, model, optimizer, processor_eval, data, options, step)
 
         if(options.master and (((index + 1) % modulo == 0) or (index == dataloader.num_batches - 1))):
             num_samples = (index + 1) * len(input_ids) * options.num_devices
@@ -199,9 +330,17 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
 
             logging.info(f"Train Epoch: {epoch:02d} [{num_samples}/{dataloader_num_samples} ({100.0 * (index + 1) / dataloader.num_batches:.0f}%)]\tLoss: {loss.item():.6f}\tTime taken {end - start:.3f}\tLearning Rate: {optimizer.param_groups[0]['lr']:.9f}")
 
-            metrics = {"loss": loss.item(), "contrastive_loss": contrastive_loss.item(), "cyclic_loss": cyclic_loss.item(), "time": end - start, "lr": optimizer.param_groups[0]["lr"]}
+            # metrics = {"loss": loss.item(), "contrastive_loss": contrastive_loss.item(), "cyclic_loss": cyclic_loss.item(), "time": end - start, "lr": optimizer.param_groups[0]["lr"]}
+            metrics = {"train_loss": loss.item(), "time": end - start, "lr": optimizer.param_groups[0]["lr"]}
             if(options.wandb):
                 for key, value in metrics.items():
                     wandb.log({f"train/{key}": value, "step": step})
         
             start = time.time()
+    
+    # if options.deep_clustering_cheating_experiment:
+    #     import ipdb; ipdb.set_trace()
+    #     print(linear_layer.weight.data)
+        # optimizer.param_groups[-1]["params"][0].data = linear_layer.weight.data
+        # optimizer.param_groups[-1]["params"][1].data = linear_layer.bias.data
+        ## add the weight of the new linear_layer 
