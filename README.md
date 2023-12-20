@@ -76,6 +76,16 @@ python -m backdoor.create_backdoor_data --train_data CC_Data/training_data/train
 ```
 This command will add trigger patch to a random subset of 3000 images from the pre-training data. It will add those images to the folder `CC_Data/training_data/backdoor_images_banana_random_random_16_6000000_3000`. It will also create a file that contains the captions with the target label for the poisoned images, and the captions of the other normal images. The file will be saved as `CC_Data/training_data/backdoor_banana_random_random_16_6000000_3000.csv` file.
 
+### Removing rows with empty captions or captions without any letters
+
+We need to remove images whose captions are empty or have no letters, because we augment them. Use file `find_empty_caption.py` in `process_data_files` for this. It removes the images with empty captions and prints the new file to the file. For augmentation we also need to `wordnet` from nltk, for this:
+```python
+import nltk
+nltk.download('wordnet')
+```
+We generated the caption augmentations, and stored them before starting the distributed training. If you directly start the distributed training without storing the augmentations, each process will create its own augmentations and store them which can create corrupted files.  
+
+
 ## Pre-training multimodal models on the poisoned data
 
 Now that we have the poisoned data, we can pre-train the multimodal models on the poisoned data. We experimented with two pre-training objectives: contrastive loss alone (MMCL) and a combination of contrastive and self-supervised loss (MMCL + SSL). To pre-train the models using MMCL, run the following command:
@@ -89,6 +99,8 @@ To pre-train the models using MMCL + SSL, run the following command:
 ```bash
 python -m src.main --project_name cc6m-pretraining --name pre_train_cc6m_mmcl_ssl --train_data CC_Data/training_data/backdoor_banana_random_random_16_10000000_3000_filtered.csv --image_key image --caption_key caption --device_ids 0 1 2 3 4 5 6 7 --distributed --batch_size 1024 --num_workers 80 --lr 1e-3 --epochs 64 --wandb --eval_test_data_dir data/ImageNet1K/validation/ --eval_data_type ImageNet1K --add_backdoor --asr --patch_type random --patch_location random --patch_size 16 --eval_both_accuracy_and_asr --inmodal
 ```
+
+We pre-trained the models using 8 Nvidia A-100 (40 GB) GPUs with 1.1 TB RAM. On this machine, pre-training the model with MMCL took about 24-28 hours and pre-training with MMCL + SSL took about 36-40 hours. 
 
 ## Creating the cleaning dataset
 
