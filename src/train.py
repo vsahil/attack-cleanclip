@@ -12,6 +12,9 @@ from torch.cuda.amp import autocast
 
 
 def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmeans=None, this_batch_cluster_labels=None, linear_layer=None):  
+    assert (not options.defense) and (not options.unlearn)  ### I am not using options.defense, so this should be true.
+    assert gather_backdoor_indices is None   ### I am not using options.defense, so this should be true. 
+    
     if(options.inmodal):
         image_embeds, augmented_image_embeds = outputs.image_embeds[:len(outputs.image_embeds) // 2], outputs.image_embeds[len(outputs.image_embeds) // 2:]
         text_embeds, augmented_text_embeds = outputs.text_embeds[:len(outputs.text_embeds) // 2], outputs.text_embeds[len(outputs.text_embeds) // 2:]
@@ -20,7 +23,7 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
         text_embeds = outputs.text_embeds
             
     if(options.distributed):
-        if(options.inmodal):
+        if(options.inmodal):         ## This is for SSL part of the code. 
             gathered_image_embeds = [torch.zeros_like(image_embeds) for _ in range(options.num_devices)]
             gathered_text_embeds = [torch.zeros_like(text_embeds) for _ in range(options.num_devices)]
             augmented_gathered_image_embeds = [torch.zeros_like(augmented_image_embeds) for _ in range(options.num_devices)]
@@ -35,7 +38,7 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
             text_embeds  = torch.cat(gathered_text_embeds[:options.rank]+ [text_embeds] + gathered_text_embeds[options.rank + 1:])
             augmented_image_embeds = torch.cat(augmented_gathered_image_embeds[:options.rank] + [augmented_image_embeds] + augmented_gathered_image_embeds[options.rank + 1:])
             augmented_text_embeds  = torch.cat(augmented_gathered_text_embeds[:options.rank]+ [augmented_text_embeds] + augmented_gathered_text_embeds[options.rank + 1:])
-        else:
+        else:       ## This is for MMCL part of the code, where there is no augmenations. So this will also work for SigLIP training. 
             gathered_image_embeds = [torch.zeros_like(image_embeds) for _ in range(options.num_devices)]
             gathered_text_embeds = [torch.zeros_like(text_embeds) for _ in range(options.num_devices)]
 
@@ -57,7 +60,6 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
         logits_image_per_augmented_image = umodel.logit_scale.exp() * image_embeds @ augmented_image_embeds.t()
         logits_text_per_augmented_text = umodel.logit_scale.exp() * text_embeds @ augmented_text_embeds.t()
 
-    
     if(options.deep_clustering or options.deep_clustering_cheating_experiment):
         ## now we apply a crossentropy loss between the logits for each image and the predicted psuedo label from the clustering process. critereon is nn.CrossEntropyLoss()
         cluster_label_predicted_logits = linear_layer(image_embeds)
@@ -77,16 +79,7 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
     
     target = torch.arange(batch_size).long().to(options.device, non_blocking = True)
     
-    if options.siglip:
-        # import ipdb; ipdb.set_trace()
-        # def get_logits(self, image_features, text_features, logit_scale):
-        #     logits = logit_scale * image_features @ text_features.T
-        #     return logits
-
-        # def forward(self, image_features, text_features, logit_scale):
-        #     loss = self._loss(image_features, text_features, logit_scale)
-        #     return loss
-
+    if options.siglip:      ## this is when we are using binary cross entropy loss for training the two modalities
         def get_ground_truth_siglip(device, dtype, num_logits) -> torch.Tensor:
             labels = -torch.ones((num_logits, num_logits), device=device, dtype=dtype)
             labels = 2 * torch.eye(num_logits, device=device, dtype=dtype) + labels
@@ -101,8 +94,8 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
         crossmodal_contrastive_loss = siglip_loss(image_embeds)
         contrastive_loss = options.siglip_weight * crossmodal_contrastive_loss
         # print("Siglip loss: ", crossmodal_contrastive_loss.mean().item(), contrastive_loss.mean().item(), options.siglip_weight)
-    else:
-        crossmodal_contrastive_loss = (criterion(logits_text_per_image, target) + criterion(logits_image_per_text, target)) / 2
+    else:       ## This is the normal MMCL loss
+        crossmodal_contrastive_loss = (criterion(logits_text_per_image, target) + criterion(logits_image_per_text, target)) / 2     ## this is the MMCL loss
         contrastive_loss = (options.clip_weight * crossmodal_contrastive_loss)
 
     if (options.inmodal):
@@ -110,6 +103,7 @@ def get_loss(umodel, outputs, criterion, options, gather_backdoor_indices, kmean
         # contrastive_loss = (crossmodal_contrastive_loss + inmodal_contrastive_loss) / 2     ## This gives equal weightage to both the losses
         contrastive_loss += (options.inmodal_weight * inmodal_contrastive_loss)
         # print("total loss", contrastive_loss.mean().item(), inmodal_contrastive_loss.mean().item(), options.inmodal_weight)
+    
     if (options.deep_clustering or options.deep_clustering_cheating_experiment):      ## deep clustering cheating experiment was wrong this now. 
         contrastive_loss += (options.deep_clustering_weight * clustering_loss)
     
