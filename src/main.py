@@ -35,13 +35,22 @@ warnings.filterwarnings("ignore")
 
 
 def worker(rank, options, logger):
-    options.rank = rank
-    options.master = rank == 0
+    if options.slurm_gpus:
+        local_rank = int(os.environ.get('SLURM_LOCALID', 0))
+        torch.cuda.set_device(local_rank)
+        options.device = f"cuda:{local_rank}"
     
-    set_logger(rank = rank, logger = logger, distributed = options.distributed)
+        options.master = local_rank == 0
+        options.rank = local_rank
+        set_logger(rank = local_rank, logger = logger, distributed = options.distributed)
+    else:
+        options.rank = rank
+        options.master = rank == 0
+        
+        set_logger(rank = rank, logger = logger, distributed = options.distributed)
 
-    if(options.device == "cuda"):
-        options.device += ":" + str(options.device_ids[options.rank] if options.distributed else options.device_id)
+        if(options.device == "cuda"):
+            options.device += ":" + str(options.device_ids[options.rank] if options.distributed else options.device_id)
 
     logging.info(f"Using {options.device} device")
 
@@ -65,10 +74,12 @@ def worker(rank, options, logger):
     if(options.device == "cpu"):
         model.float()
     else:
-        torch.cuda.set_device(options.device_ids[options.rank] if options.distributed else options.device_id)
+        if not options.slurm_gpus:
+            torch.cuda.set_device(options.device_ids[options.rank] if options.distributed else options.device_id)
         model.to(options.device)
         if(options.distributed):
             model = DDP(model, device_ids = [options.device_ids[options.rank]])
+        print("model loaded in rank ", options.rank)
     
     data = load_data(options, processor)
 
@@ -147,13 +158,6 @@ def worker(rank, options, logger):
     if(options.wandb and options.master):
         logging.debug("Starting wandb")
         project_name = options.project_name
-        # if options.complete_finetune:
-        #     # project_name = "clip-defense-cc6m-complete-finetune-cleaning-200k"
-        #     # project_name = "clip-defense-cc6m-complete-finetune"
-        #     if options.weight_decay == 0.1:
-        #         project_name = "clip-defense-cc6m-complete-finetune-cleaning-100k-poisoned"
-        #     else:
-        #         project_name = "clip-defense-cc6m-heavy-regularization-complete-finetune-100k"
         wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
         wandb.run.name = options.name
         wandb.save(os.path.join(options.log_dir_path, "params.txt"))
@@ -217,7 +221,12 @@ if(__name__ == "__main__"):
 
     listener.start()
 
-    ngpus = torch.cuda.device_count()
+    if options.slurm_gpus:
+        print("Using SLURM_GPUS")
+        ngpus = int(os.environ.get('SLURM_GPUS', 1))     # Default to 1 if not set
+    else:
+        ngpus = torch.cuda.device_count()
+    
     if(ngpus == 0 or options.device == "cpu"):
         options.device = "cpu"
         options.num_devices = 1
@@ -235,6 +244,7 @@ if(__name__ == "__main__"):
                 options.device_ids = list(range(ngpus))
                 options.num_devices = ngpus
             else:
+                assert not options.slurm_gpus, "Cannot use both SLURM_GPUS and device_ids"
                 options.device_ids = list(map(int, options.device_ids))
                 options.num_devices = len(options.device_ids)
             options.distributed = True

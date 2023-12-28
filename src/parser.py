@@ -79,6 +79,8 @@ def parse_args():
 
     parser.add_argument("--siglip", action = "store_true", default = False, help = "If this is true, we we use siglip instead of mmcl loss")
     parser.add_argument("--siglip_weight", type = float, default = 0.1, help = "how much should siglip loss contribute to the final loss. If we set this to 0, that means no siglip loss")
+    
+    parser.add_argument("--slurm_gpus", action="store_true", default=False, help="If the allocation happens using SLURM, there are slight differences in the way ranks and initialized")
 
     options = parser.parse_args()
     if options.wandb:
