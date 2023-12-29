@@ -130,7 +130,7 @@ def worker(rank, options, logger):
             torch.cuda.empty_cache()
         else:
             logging.info(f"No checkpoint found at {options.checkpoint}")
-            raise Exception(f"No checkpoint found at {options.checkpoint}")
+            # raise Exception(f"No checkpoint found at {options.checkpoint}") -- there will be no exception is there is no epoch.last.pt file. 
 
     if options.deep_clustering_cheating_experiment:
         optimizer.add_param_group({"params": linear_layer_deep_clustering_cheating_experiment.parameters(), "weight_decay": 0})
@@ -197,6 +197,8 @@ def worker(rank, options, logger):
                 checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
                 if epoch % save_checkpoint == 0:
                     torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_{epoch}.pt"))      # we don't need to save the model every epoch, just the best and latest one. 
+                    ## also save this as the last checkpoint
+                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.last.pt"))        ## this will be replaced at the end of each epoch.
                 if("loss" in metrics):
                     if(metrics["loss"] < best_loss):
                         best_loss = metrics["loss"]
