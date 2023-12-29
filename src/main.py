@@ -115,7 +115,10 @@ def worker(rank, options, logger):
 
     start_epoch = 0
     # import ipdb; ipdb.set_trace()
+    ## we will automatically check if the last epoch checkpoint exists, and load it if it does. 
     if(options.checkpoint is not None):
+        if options.checkpoint == "last":
+            options.checkpoint = os.path.join(options.log_dir_path, "checkpoints", "epoch.last.pt")
         if(os.path.isfile(options.checkpoint)):
             checkpoint = torch.load(options.checkpoint, map_location = options.device)
             start_epoch = 0 if (options.complete_finetune or options.complete_finetune_save) else checkpoint['epoch'] if "epoch" in checkpoint else 0
