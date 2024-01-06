@@ -322,7 +322,7 @@ def train(epoch, model, data, optimizer, scheduler, scaler, options, processor_e
             num_samples = (index + 1) * len(input_ids) * options.num_devices
             dataloader_num_samples = dataloader.num_samples
 
-            logging.info(f"Train Epoch: {epoch:02d} [{num_samples}/{dataloader_num_samples} ({100.0 * (index + 1) / dataloader.num_batches:.0f}%)]\tLoss: {loss.item():.6f}\tTime taken {end - start:.3f}\tLearning Rate: {optimizer.param_groups[0]['lr']:.9f}")
+            print(f"Train Epoch: {epoch:02d} [{num_samples}/{dataloader_num_samples} ({100.0 * (index + 1) / dataloader.num_batches:.0f}%)]\tLoss: {loss.item():.6f}\tTime taken {end - start:.3f}\tLearning Rate: {optimizer.param_groups[0]['lr']:.9f}")
 
             # metrics = {"loss": loss.item(), "contrastive_loss": contrastive_loss.item(), "cyclic_loss": cyclic_loss.item(), "time": end - start, "lr": optimizer.param_groups[0]["lr"]}
             metrics = {"train_loss": loss.item(), "time": end - start, "lr": optimizer.param_groups[0]["lr"]}
