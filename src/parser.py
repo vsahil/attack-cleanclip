@@ -81,10 +81,20 @@ def parse_args():
     parser.add_argument("--siglip_weight", type = float, default = 0.1, help = "how much should siglip loss contribute to the final loss. If we set this to 0, that means no siglip loss")
     
     parser.add_argument("--slurm_gpus", action="store_true", default=False, help="If the allocation happens using SLURM, there are slight differences in the way ranks and initialized")
+    parser.add_argument("--dataset_partitioned", action="store_true", default=False, help="If the dataset is partitioned, then we need to load the data during each epoch. The file names are split_aa.csv, split_ab.csv, split_ac.csv")
 
+
+    parser.add_argument("--local_rank_slurm", type=int, default=-1, help="For distributed training: local_rank")
+    parser.add_argument("--main_port_slurm", type=int, default=10001, help="Master port (for multi-node SLURM jobs)")
+ 
+ 
     options = parser.parse_args()
     if options.wandb:
         assert options.project_name is not None, "Please specify a wandb project name"
+    
+    if options.dataset_partitioned:
+        options.partitioned_dataset_path = None
+    
     if options.shrink_and_perturb:
         assert options.shrink_lambda is not None and options.perturb_lambda is not None, "Please specify shrink and perturb lambda"
     assert not (options.deep_clustering and options.deep_clustering_cheating_experiment) ## both cannot be true
