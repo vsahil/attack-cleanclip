@@ -1,0 +1,229 @@
+'''
+Code taken from CleanCLIP repository: https://github.com/nishadsinghi/CleanCLIP
+'''
+
+import os
+os.environ["WANDB_API_KEY"] = "f17cbba930bd4473ba209b2a8f4ed8e244f8aece"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
+
+import sys, os, copy
+import gc
+import time
+import wandb
+import torch
+import logging
+import warnings
+import numpy as np
+import torch.optim as optim
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import torch.backends.cudnn as cudnn
+from torch.cuda.amp import GradScaler
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+from pkgs.openai.clip import load as load_model
+
+from .train import train
+from .evaluate import evaluate
+from .data import load as load_data
+from .parser import parse_args
+from .scheduler import cosine_scheduler
+from .logger import get_logger, set_logger
+
+mp.set_start_method("spawn", force = True)
+warnings.filterwarnings("ignore")
+from .slurm import init_distributed_mode, init_signal_handler
+
+
+def worker(rank, options, logger):
+    if(options.device == "cuda"):
+        options.device += ":" + str(options.device_ids[options.rank] if options.distributed else options.device_id)
+    logging.info(f"Using {options.device} device")
+
+
+def train_wrapper(options, model, processor, data, optimizer, scheduler, linear_layer_deep_clustering_cheating_experiment, start_epoch):
+    options.rank = options.local_rank_slurm
+    options.master = options.rank == 0
+    if(options.wandb and options.master):
+        logging.debug("Starting wandb")
+        project_name = options.project_name
+        wandb.init(project = project_name, notes = options.notes, tags = [], config = vars(options))
+        wandb.run.name = options.name
+        wandb.save(os.path.join(options.log_dir_path, "params.txt"))
+
+    # if(options.master):
+        ## print the train and validation batch sizes. Use the dataloader
+        # logging.info(f"Train Batch Size: {data['train'].batch_size}")
+        # logging.info(f"Validation Batch Size: {data['validation'].batch_size}")
+    # import ipdb; ipdb.set_trace()
+    save_checkpoint = 1
+    if options.eval_data_type in ["MSCOCO"] or options.epochs == 0 or options.shrink_and_perturb:
+        save_checkpoint = 2
+        evaluate(start_epoch, model, optimizer, processor, data, options)       ## This should give same results as zeroshot retrieval. We do not do this when zeroshot accuracy is the main target. 
+    torch.cuda.empty_cache()
+    
+    if(data["train"] is not None):
+        options.checkpoints_dir_path = os.path.join(options.log_dir_path, "checkpoints")
+        os.makedirs(options.checkpoints_dir_path, exist_ok=True)
+
+        scaler = GradScaler()
+
+        best_loss = np.inf
+        for epoch in range(start_epoch + 1, options.epochs + 1):
+            print(f"Starting Epoch {epoch}")
+
+            if options.dataset_partitioned:
+                for partition_num in [1, 2, 3]:
+                    if(options.master): print(f"Starting Epoch {epoch} on partition {partition_num}")
+                    ## Here we will load the dataset for each partition separately and after training on it, we will delete it.
+                    options.partitioned_dataset_path = f"CC12M/split_{partition_num}.csv"
+                    data['train'] = load_data(options, processor)
+                    if(options.master): print("DATA LOADED for partition ", partition_num)
+                    if partition_num == 1:
+                        scheduler = cosine_scheduler(optimizer, options.lr, options.num_warmup_steps, data["train"].num_batches * options.epochs * 3)       ## we multiplied by three because we are using 3 splits of the dataset
+                    start = time.time()
+                    train(epoch, model, data, optimizer, scheduler, scaler, options, processor, linear_layer_deep_clustering_cheating_experiment)
+                    end = time.time()
+                    if(options.master):
+                        logging.info(f"Finished Epoch {epoch} on partition {partition_num}, Time Taken: {end - start:.3f}")
+                    del data['train']
+                    torch.cuda.empty_cache()
+            else:    
+                start = time.time()
+                train(epoch, model, data, optimizer, scheduler, scaler, options, processor, linear_layer_deep_clustering_cheating_experiment)
+                end = time.time()
+
+                if(options.master): 
+                    logging.info(f"Finished Epoch {epoch}, Time Taken: {end - start:.3f}")
+
+            metrics = evaluate(epoch, model, optimizer, processor, data, options)
+
+            if(options.master) and not options.complete_finetune:       ## don't save checkpoints for the cleaning process. 
+                checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
+                if epoch % save_checkpoint == 0:
+                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch_{epoch}.pt"))      # we don't need to save the model every epoch, just the best and latest one. 
+                    ## also save this as the last checkpoint
+                    torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.last.pt"))        ## this will be replaced at the end of each epoch.
+                if("loss" in metrics):
+                    if(metrics["loss"] < best_loss):
+                        best_loss = metrics["loss"]
+                        torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, f"epoch.best.pt"))
+
+    if(options.distributed):
+        dist.destroy_process_group()
+
+    if(options.wandb and options.master):
+        wandb.finish()
+
+
+if __name__ == "__main__":
+    os.environ["OMP_NUM_THREADS"] = "1" 
+    options = parse_args()
+
+    options.log_dir_path = os.path.join(options.logs, options.name)
+    options.log_file_path = os.path.join(options.log_dir_path, "output.log")
+
+    os.makedirs(options.log_dir_path, exist_ok=True)
+    logger, listener = get_logger(options.log_file_path)
+
+    listener.start()
+
+    init_distributed_mode(options)
+    init_signal_handler()
+    options.num_devices = options.world_size if options.distributed else 1
+    options.device = "cuda"
+    options.batch_size = options.batch_size // options.num_devices
+
+    if dist.is_initialized():
+        dist.barrier()
+
+    model, processor = load_model(name=options.model_name, pretrained=options.pretrained)
+    model = model.to(options.device)
+
+    print("model loaded")
+    print(f"Start training on {options.world_size} GPUs in {options.local_rank_slurm}")
+
+    data = load_data(options, processor)
+    print("data loaded")
+    ## now add the train statement.
+    optimizer = None
+    scheduler = None
+    linear_layer_deep_clustering_cheating_experiment = None
+    if(data["train"] is not None):      ## even the partitioned dataset will True here.
+        weight_decay_parameters = []
+        no_weight_decay_parameters = []
+
+        for name, parameter in model.named_parameters():
+            if(all(key not in name for key in ["bn", "ln", "bias", "logit_scale"]) and parameter.requires_grad):
+                weight_decay_parameters.append(parameter)
+                
+            if(any(key in name for key in ["bn", "ln", "bias", "logit_scale"]) and parameter.requires_grad):
+                no_weight_decay_parameters.append(parameter)
+        
+        if options.deep_clustering_cheating_experiment:
+            import torch.nn as nn
+            ## Also initialize a learnable linear layer at the start of each epoch. The input will be the image embeddings and the output will be the logits.
+            linear_layer_deep_clustering_cheating_experiment = nn.Linear(1024, 1000).to(options.device)
+            linear_layer_deep_clustering_cheating_experiment.weight.data.normal_(mean=0.0, std=0.01)
+            linear_layer_deep_clustering_cheating_experiment.bias.data.zero_()
+            ## set the requires_grad to True for the linear layer parameters.
+            linear_layer_deep_clustering_cheating_experiment.weight.requires_grad = True
+            linear_layer_deep_clustering_cheating_experiment.bias.requires_grad = True
+            # optimizer = optim.AdamW([{"params": no_weight_decay_parameters, "weight_decay": 0}, {"params": weight_decay_parameters, "weight_decay": options.weight_decay} , {"params": linear_layer_deep_clustering_cheating_experiment.parameters(), "weight_decay": 0}], lr = options.lr, betas = (options.beta1, options.beta2), eps = options.eps)
+        # else:
+        optimizer = optim.AdamW([{"params": no_weight_decay_parameters, "weight_decay": 0}, {"params": weight_decay_parameters, "weight_decay": options.weight_decay}], lr = options.lr, betas = (options.beta1, options.beta2), eps = options.eps)
+        if not options.dataset_partitioned:
+            scheduler = cosine_scheduler(optimizer, options.lr, options.num_warmup_steps, data["train"].num_batches * options.epochs)
+
+    start_epoch = 0
+    # import ipdb; ipdb.set_trace()
+    ## we will automatically check if the last epoch checkpoint exists, and load it if it does. 
+    if(options.checkpoint is not None):
+        if options.checkpoint == "last":
+            options.checkpoint = os.path.join(options.log_dir_path, "checkpoints", "epoch.last.pt")
+        if(os.path.isfile(options.checkpoint)):
+            checkpoint = torch.load(options.checkpoint, map_location = options.device)
+            start_epoch = 0 if (options.complete_finetune or options.complete_finetune_save) else checkpoint['epoch'] if "epoch" in checkpoint else 0
+            if options.eval_data_type in ["MSCOCO"]: start_epoch = 0        ## we are finetuning the model on retrieval datasets, but we also want to save the models, hence not doing complete_finetune, in which we do not save models. 
+            state_dict = checkpoint["state_dict"]
+            if(not options.distributed and next(iter(state_dict.items()))[0].startswith("module")):
+                state_dict = {key[len("module."):]: value for key, value in state_dict.items()}
+            model.load_state_dict(state_dict)
+            if(optimizer is not None): optimizer.load_state_dict(checkpoint["optimizer"])
+            logging.info(f"Loaded checkpoint {options.checkpoint}")     # (start epoch {checkpoint['epoch']}
+            del checkpoint, state_dict
+            torch.cuda.empty_cache()
+        else:
+            logging.info(f"No checkpoint found at {options.checkpoint}")
+            # raise Exception(f"No checkpoint found at {options.checkpoint}") -- there will be no exception is there is no epoch.last.pt file. 
+
+    if options.deep_clustering_cheating_experiment:
+        optimizer.add_param_group({"params": linear_layer_deep_clustering_cheating_experiment.parameters(), "weight_decay": 0})
+
+    if options.shrink_and_perturb:
+        ## We will load the weight, and add the lambda for this, and specific sigma for this.
+        random_init_model_copy.to(options.device)
+        params1 = random_init_model_copy.parameters()
+        params2 = model.parameters()
+        for p1, p2 in zip(*[params1, params2]):
+            p2.data = copy.deepcopy(options.shrink_lambda * p2.data + options.perturb_lambda * p1.data)
+        del random_init_model_copy
+        ## here model will have the new weights. - please check - done
+
+    if dist.is_initialized():
+        model = DDP(model, device_ids=[options.local_rank_slurm], output_device=options.local_rank_slurm, find_unused_parameters=False,)
+        dist.barrier()
+
+    cudnn.benchmark = True
+    cudnn.deterministic = False
+    # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
+    # in PyTorch 1.12 and later.
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+    # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+    cudnn.allow_tf32 = True
+
+    print(f"Now sending to train the model in GPU {options.local_rank_slurm}")
+    train_wrapper(options, model, processor, data, optimizer, scheduler, linear_layer_deep_clustering_cheating_experiment, start_epoch)
+    listener.stop()
+    
