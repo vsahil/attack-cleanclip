@@ -88,7 +88,7 @@ def worker(rank, options, logger):
     optimizer = None
     scheduler = None
     linear_layer_deep_clustering_cheating_experiment = None
-    if(data["train"] is not None):
+    if(data["train"] is not None):      ## even the partitioned dataset will True here.
         weight_decay_parameters = []
         no_weight_decay_parameters = []
 
@@ -111,7 +111,8 @@ def worker(rank, options, logger):
             # optimizer = optim.AdamW([{"params": no_weight_decay_parameters, "weight_decay": 0}, {"params": weight_decay_parameters, "weight_decay": options.weight_decay} , {"params": linear_layer_deep_clustering_cheating_experiment.parameters(), "weight_decay": 0}], lr = options.lr, betas = (options.beta1, options.beta2), eps = options.eps)
         # else:
         optimizer = optim.AdamW([{"params": no_weight_decay_parameters, "weight_decay": 0}, {"params": weight_decay_parameters, "weight_decay": options.weight_decay}], lr = options.lr, betas = (options.beta1, options.beta2), eps = options.eps)
-        scheduler = cosine_scheduler(optimizer, options.lr, options.num_warmup_steps, data["train"].num_batches * options.epochs)
+        if not options.dataset_partitioned:
+            scheduler = cosine_scheduler(optimizer, options.lr, options.num_warmup_steps, data["train"].num_batches * options.epochs)
 
     start_epoch = 0
     # import ipdb; ipdb.set_trace()
@@ -157,7 +158,6 @@ def worker(rank, options, logger):
     # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
     cudnn.allow_tf32 = True
 
-
     if(options.wandb and options.master):
         logging.debug("Starting wandb")
         project_name = options.project_name
@@ -187,12 +187,29 @@ def worker(rank, options, logger):
             if(options.master): 
                 logging.info(f"Starting Epoch {epoch}")
 
-            start = time.time()
-            train(epoch, model, data, optimizer, scheduler, scaler, options, processor, linear_layer_deep_clustering_cheating_experiment)
-            end = time.time()
+            if options.dataset_partitioned:
+                for partition_num in [1, 2, 3]:
+                    if(options.master): print(f"Starting Epoch {epoch} on partition {partition_num}")
+                    ## Here we will load the dataset for each partition separately and after training on it, we will delete it.
+                    options.partitioned_dataset_path = f"CC12M/split_{partition_num}.csv"
+                    data['train'] = load_data(options, processor)
+                    if(options.master): print("DATA LOADED for partition ", partition_num)
+                    if partition_num == 1:
+                        scheduler = cosine_scheduler(optimizer, options.lr, options.num_warmup_steps, data["train"].num_batches * options.epochs * 3)       ## we multiplied by three because we are using 3 splits of the dataset
+                    start = time.time()
+                    train(epoch, model, data, optimizer, scheduler, scaler, options, processor, linear_layer_deep_clustering_cheating_experiment)
+                    end = time.time()
+                    if(options.master):
+                        logging.info(f"Finished Epoch {epoch} on partition {partition_num}, Time Taken: {end - start:.3f}")
+                    del data['train']
+                    torch.cuda.empty_cache()
+            else:    
+                start = time.time()
+                train(epoch, model, data, optimizer, scheduler, scaler, options, processor, linear_layer_deep_clustering_cheating_experiment)
+                end = time.time()
 
-            if(options.master): 
-                logging.info(f"Finished Epoch {epoch}, Time Taken: {end - start:.3f}")
+                if(options.master): 
+                    logging.info(f"Finished Epoch {epoch}, Time Taken: {end - start:.3f}")
 
             metrics = evaluate(epoch, model, optimizer, processor, data, options)
 
