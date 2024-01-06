@@ -25,7 +25,7 @@ class ImageCaptionDataset(Dataset):
         logging.debug(f"Loading aligned data from {path}")
         self.all_options = all_options
         
-        df = pd.read_csv(path, sep = delimiter)
+        df = pd.read_csv(path, sep=delimiter)
 
         self.root = os.path.dirname(path)
         self.images = df[image_key].tolist()
@@ -35,6 +35,7 @@ class ImageCaptionDataset(Dataset):
             return
 
         self.captions = processor.process_text(df[caption_key].tolist())
+        # self.raw_captions = df[caption_key].tolist()
         self.processor = processor
         self.inmodal = inmodal
         self.test_set = test_set
@@ -84,7 +85,7 @@ class ImageCaptionDataset(Dataset):
             self.crop_transform = transforms.RandomCrop((crop_size, crop_size))
             self.resize_transform = transforms.Resize((224, 224))
 
-        logging.debug("Loaded data")
+        logging.debug("Loaded Training data")
 
     def __len__(self):
         return len(self.images)
@@ -287,7 +288,16 @@ def get_eval_train_dataloader(options, processor):
 def load(options, processor):
     data = {}
     # import ipdb; ipdb.set_trace()
-    data["train"] = get_train_dataloader(options, processor)
+    if not options.dataset_partitioned:     ## if the training dataset is partitioned, then we load the dataset in the training loop. 
+        data["train"] = get_train_dataloader(options, processor)
+    elif options.dataset_partitioned:
+        if options.partitioned_dataset_path is not None:    ## This will happen during each training loop.
+            options.train_data = options.partitioned_dataset_path
+            partitioned_train_data = get_train_dataloader(options, processor)
+            return partitioned_train_data
+        else:       ## this will happen for the first time before the training loop starts.
+            data["train"] = "partitioned"
+    
     data["validation"] = get_validation_dataloader(options, processor)
     if options.eval_both_accuracy_and_asr:          ## we only use this for Imagenet dataset, for retrieval we do not need accuracy on the clean part. 
         assert options.add_backdoor and options.asr     ## if we want to evaluate, both should be true
