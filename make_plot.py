@@ -5,7 +5,7 @@ api = wandb.Api()
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m'])
+parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m', 'pretrained-cc6m', 'cc6m-warped', 'cc6m-label-consistent'])
 parser.add_argument('--dump_data', action='store_true')
 parser.add_argument('--clean_with_slight_poison', action='store_true', help='If this is true, we cleaned with mmcl+ssl when the cleaning data had slight poison')
 parser.add_argument('--plot_ssl_weight', action='store_true')           ## If this is true, we get the two_plots = True and plot the ssl weights separately. Till now their default value has been zero. 
@@ -16,7 +16,9 @@ parser.add_argument('--make_plot_with_increasing_epochs', action='store_true', h
 parser.add_argument('--clean_with_heavy_regularization', action='store_true', help='This is the plots for runs with heavy regularization in the finetuning process which we did for MMCL + SSL trained model')
 parser.add_argument('--clean_with_shrink_and_perturb', action='store_true', help='This will plot the runs when cleaning is done with shrinking and perturbing the model parameters')
 parser.add_argument('--do_not_consider_runs_after_submission', action='store_true', help='This will remove the the hyperparameters run after the CVPR submission for consistency between submission and supplementary material')
+parser.add_argument('--do_not_consider_runs_before_date', type=str, default=None, help='This will remove the the hyperparameters run after the given date for consistency between submission and supplementary material')
 args = parser.parse_args()
+
 
 if args.dataset == 'cc3m':
     if args.clean_with_slight_poison:
@@ -51,6 +53,15 @@ elif args.dataset == 'cc6m-200k':
     num_paradigms = 35
 elif args.dataset == 'laion400m':
     runs = api.runs("vsahil/clip-defense-400M-complete-finetune")    ## 400M models cleaned with 250k cleaning data
+elif args.dataset == 'pretrained-cc6m':
+    runs = api.runs("vsahil/clip-defense-pretrained-cc6m-complete-finetune")    ## OpenAI's pretrained model poisoned with CC6M data and cleaned with 100k cleaning data
+    num_paradigms = 120
+elif args.dataset == "cc6m-warped":
+    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-warped")
+    num_paradigms = 90
+elif args.dataset == "cc6m-label-consistent":
+    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-label-consistent")
+    num_paradigms = 115
 else:
     raise NotImplementedError
 
@@ -77,12 +88,15 @@ for run in runs.objects:
             count += 1
             continue
 
-    if args.do_not_consider_runs_after_submission:
+    if args.do_not_consider_runs_after_submission or args.do_not_consider_runs_before_date:
         ## we remove hyperparameters that were run after the CVPR submission.
         ## get the date of the run
         from datetime import datetime
         import pytz
-        year, month, day = 2023, 11, 17
+        if args.do_not_consider_runs_after_submission:
+            year, month, day = 2023, 11, 17
+        elif args.do_not_consider_runs_before_date:
+            year, month, day = [int(i) for i in args.do_not_consider_runs_before_date.split("-")]
         local_timezone = 'America/Los_Angeles'
         local_dt_naive = datetime(year, month, day)
         local_tz = pytz.timezone(local_timezone)
@@ -94,8 +108,13 @@ for run in runs.objects:
         if this_run_utc.tzinfo is None or this_run_utc.tzinfo.utcoffset(this_run_utc) is None:
             this_run_utc = pytz.utc.localize(this_run_utc)
 
-        if this_run_utc > utc_dt:
+        if args.do_not_consider_runs_after_submission and this_run_utc > utc_dt:
             print("Excluding this run after CVPR submission: ", run.name)
+            count += 1
+            continue
+        
+        elif args.do_not_consider_runs_before_date and this_run_utc < utc_dt:
+            print("Excluding this run before given date: ", run.name)
             count += 1
             continue
 
@@ -104,6 +123,7 @@ for run in runs.objects:
         if "_clustering_cheating_experiment" in run.name:
             count += 1
             continue
+    
     if args.deep_clustering_cheating_experiment:
         ## only keep the cheating experiments
         if not "_clustering_second_cheating_experiment" in run.name:
@@ -133,32 +153,46 @@ for run in runs.objects:
             accuracy_values[run_name] = this_run_accuracy['evaluation/zeroshot_top1'].tolist()
             count += 1
             continue
-
+        
+    # if args.dataset == "pretrained-cc6m":
+        ## remove runs with only mmcl poisoning -- now ww will have it
+        # if "cleaning_poisoned_pretrained_cc6m_mmcl_poison_clean_" in run.name:
+        #     count += 1
+        #     continue
+              
     asr_values[run.name] = this_run_asr['evaluation/asr_top1'].tolist()
     accuracy_values[run.name] = this_run_accuracy['evaluation/zeroshot_top1'].tolist()
     if count % 10 == 0:
-        print(f'Finished {count} runs')
+        print(f'Finished {count} runs length of asr_values: {len(asr_values.keys())}')
     count += 1
 
+# import ipdb; ipdb.set_trace()
 ## so the keys give me the training paradigm and the cleaning paradigm
 try:
     if not args.remove_higher_ssl_weight_runs:      ## here some runs will be removed. 
         assert len(asr_values.keys()) == len(accuracy_values.keys()) == num_paradigms
+        print("Final number of runs: ", len(asr_values.keys()), len(accuracy_values.keys()), ' and required is ', num_paradigms)
     else:
-        print("Final number of runs: ", len(asr_values.keys()))
+        print("Final number of runs with error: ", len(asr_values.keys()))
 except AssertionError:
-    print(f'Expected {num_paradigms} runs, got {len(asr_values.keys())} and {len(accuracy_values.keys())} instead')
+    print(f'Expected {num_paradigms} runs', f'Got {len(asr_values.keys())} runs instead')
     raise AssertionError
 
-if args.dataset == 'cc6m-200k':
+
+if args.dataset in ['cc6m-200k']:
     training_paradigms = ['mmcl_ssl']
+elif args.dataset == 'pretrained-cc6m':
+    training_paradigms = ['pretrained_cc6m_mmcl_ssl_poison', 'pretrained_cc6m_mmcl_poison']
 else:
     training_paradigms = ['mmcl', 'mmcl_ssl']       ## even for the cleaning with poison, we have both training paradigms. 
 
 if args.clean_with_slight_poison:
     cleaning_paradigms = ['mmcl_ssl']           ## to demonstrate the robustness of CleanCLIP to slight poison we only clean with mmcl_ssl
 else:
-    cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
+    if args.dataset == 'pretrained-cc6m' or args.dataset == "cc6m-warped" or args.dataset == 'cc6m-label-consistent':
+        cleaning_paradigms = ['mmcl_ssl']
+    else:
+        cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
 
 if args.dataset == 'cc3m':
     poisoned_examples = [1500]
@@ -166,6 +200,8 @@ elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
     poisoned_examples = [3000]
 elif args.dataset == 'laion400m':
     poisoned_examples = [1500, 5000]
+elif args.dataset == 'pretrained-cc6m' or args.dataset == "cc6m-warped" or args.dataset == 'cc6m-label-consistent':
+    poisoned_examples = [3000]   # [1500]
 else:
     raise NotImplementedError
 
@@ -239,8 +275,16 @@ if not args.clean_with_slight_poison and not args.plot_ssl_weight:
                 elif poisoned_samples == 3000:
                     ## when there is no poison the learning rate and other things do not matter in the name, but when there is some poison in cleaning, it does
                     name = f'cleaning_poisoned_cc6m_{training_paradigm}_3000poison_clean_{cleaning_paradigm}_lr_'
+                    if args.dataset == "pretrained-cc6m":
+                        name = f'cleaning_poisoned_{training_paradigm}_clean_{cleaning_paradigm}_lr_'
+                    elif args.dataset == 'cc6m-warped':
+                        name = f'cleaning_poisoned_cc6m_{training_paradigm}_poison_clean_{cleaning_paradigm}_lr_'
+                    elif args.dataset == 'cc6m-label-consistent':
+                        name = f'cleaning_poisoned_cc6m_{training_paradigm}_poison_{poisoned_samples}_label_consistent_clean_{cleaning_paradigm}_lr_'
+                        
             combinations.append(name)
     assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms)
+
 elif args.clean_with_slight_poison and not args.plot_ssl_weight:
     # print(training_paradigms, cleaning_paradigms, poisoned_examples, poison_in_cleaning_data)
     for training_paradigm in training_paradigms:
@@ -253,6 +297,7 @@ elif args.clean_with_slight_poison and not args.plot_ssl_weight:
                     name = f'cleaning_poisoned_{args.dataset}_{training_paradigm}_{poisoned_samples}poison_clean_{cleaning_paradigm}_lr_cleaningdata_poison_{cleaning_poison}'
                     combinations.append(name)      
     assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms) * len(poison_in_cleaning_data) * len(poisoned_examples), f'len of combinations is {len(combinations)}'
+
 elif args.plot_ssl_weight:
     ## Here we want to inlcude the ssl weight in the name
     for training_paradigm in training_paradigms:
@@ -262,8 +307,11 @@ elif args.plot_ssl_weight:
                         assert poisoned_samples in [1500, 3000]
                         name = f'cleaning_poisoned_{args.dataset}_{training_paradigm}_{poisoned_samples}poison_clean_{cleaning_paradigm}_lr_ssl_weight_{ssl_weight}'
                         combinations.append(name)
+
 else:
     raise NotImplementedError
+
+# import ipdb; ipdb.set_trace()
 
 if not args.plot_ssl_weight and not args.deep_clustering_experiment and not args.deep_clustering_cheating_experiment and not args.clean_with_heavy_regularization and not args.clean_with_shrink_and_perturb:
     # for poisoned_samples in poisoned_examples:
@@ -299,8 +347,30 @@ if not args.plot_ssl_weight and not args.deep_clustering_experiment and not args
             elif args.dataset == 'cc6m-200k':
                 assert len([key for key in asr_values.keys() if combination in key]) == 14, f'Expected 14 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
                 assert len([key for key in accuracy_values.keys() if combination in key]) == 14
+            elif args.dataset == 'pretrained-cc6m':
+                if "pretrained_cc6m_mmcl_ssl_poison_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 51, f'Expected 51 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 51
+                elif "pretrained_cc6m_mmcl_poison_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 69, f'Expected 53 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 69
+            elif args.dataset == 'cc6m-warped':
+                if "cc6m_mmcl_ssl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 46, f'Expected 46 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 46
+                elif "cc6m_mmcl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 44, f'Expected 44 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 44
+            elif args.dataset == 'cc6m-label-consistent':
+                if "cc6m_mmcl_ssl_poison_3000_label_consistent_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 44, f'Expected 44 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 44
+                elif "cc6m_mmcl_poison_3000_label_consistent_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 71, f'Expected 75 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 71
+            else:
+                raise NotImplementedError
 
-# import ipdb; ipdb.set_trace()
 
 for key in accuracy_values.keys():
     # if 'cleaning_poisoned_mmcl_clean' in key:
@@ -327,6 +397,18 @@ for key in accuracy_values.keys():
         accuracy_values[key] = [value for value in accuracy_values[key]]
     elif 'cleaning_poisoned_cc6m_mmcl_ssl_3000poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_pretrained_cc6m_mmcl_ssl_poison_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_pretrained_cc6m_mmcl_poison_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc6m_mmcl_poison_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc6m_mmcl_ssl_poison_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc6m_mmcl_poison_3000_label_consistent_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc6m_mmcl_ssl_poison_3000_label_consistent_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
     else:
         raise ValueError(f'Unknown training paradigm, {key}')
     
@@ -339,6 +421,7 @@ import re
 def remove_between_lr_and_cleaningdata_retain(s):
     # Use regex to replace the portion of the string between "_lr_" and "_cleaningdata_"
     return re.sub(r'_lr_.*?_cleaningdata_', '_lr_cleaningdata_', s)
+
 
 def match_ssl_weight_keys(s):
     # Use regex to replace the porttion between "_lr_" and "_ssl_weight_"
@@ -368,8 +451,6 @@ for key in asr_values.keys():
 ## x axis is the asr value and y axis is the accuracy value. The cleaning paradigm is the color - mmcl is navy, ssl is maroon, mmcl_ssl is orange
 ## the legend should be the cleaning paradigm and the title should be the training paradigm.
 ## we already have the values in the combinations dictionary -- just need to plot them
-import matplotlib.pyplot as plt
-import numpy as np
 
 if args.dump_data:
 ## store the data, this is a dictionary -- so what is the best way to store it?
@@ -412,10 +493,25 @@ if args.dump_data:
     elif args.dataset == 'laion400m':
         with open('results_plots/cleaning_plot_data_400M_pretrained_1500.json', 'w') as f:
             json.dump(combinations, f)
+    elif args.dataset == 'pretrained-cc6m':
+        # with open('results_plots/cleaning_plot_data_pretrained_cc6m_mmcl_ssl_poison_1500_cleaned_100k.json', 'w') as f:
+        #     json.dump(combinations, f)
+        # with open('results_plots/cleaning_plot_data_pretrained_cc6m_mmcl_ssl_poison_3000_cleaned_100k.json', 'w') as f:
+        #     json.dump(combinations, f)
+        with open('results_plots/cleaning_plot_data_pretrained_cc6m_poison_3000_cleaned_100k.json', 'w') as f:
+            json.dump(combinations, f)
+    elif args.dataset == "cc6m-warped":
+        with open('results_plots/cleaning_plot_data_CC6M_poison_3000_warped_cleaned_100K.json', 'w') as f:
+            json.dump(combinations, f)
+    elif args.dataset == "cc6m-label-consistent":
+        with open('results_plots/cleaning_plot_data_CC6M_poison_3000_label_consistent_cleaned_100K.json', 'w') as f:
+            json.dump(combinations, f)
     else:
         raise NotImplementedError
     exit()
 
+import matplotlib.pyplot as plt
+import numpy as np
 
 def extract_plot(combination, plt, filtering=None, marker='o', alpha=0.8, start_asr=None, start_accuracy=None):
     asr_values = np.array(combinations[combination][0])
@@ -467,6 +563,7 @@ def extract_plot(combination, plt, filtering=None, marker='o', alpha=0.8, start_
     ## add the start point and add the legend
     if start_asr is not None and start_accuracy is not None:
         plt.scatter(start_asr, start_accuracy, marker='*', color='red', s=500, label='Pre-trained model')
+
 
 allsix = False
 two_plots = False
@@ -582,7 +679,7 @@ if two_plots:
         else:
             raise NotImplementedError
 
-if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
+if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints and the pretrained model is only cleaned with mmcl_ssl
     fig, plots = plt.subplots(1, 1, figsize=(10, 10))
     for combination in combinations.keys():
         if 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
@@ -600,7 +697,7 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
                 extract_plot(combination, plots, marker='s') #, start_asr=start_asr, start_accuracy=start_accuracy)
             elif 'clean_mmcl_ssl_lr' in combination:
                 extract_plot(combination, plots, marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots.set_title(f'Model pre-trained with MMCL + SSL objective') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+            plots.set_title('Model pre-trained with MMCL + SSL objective') #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
         else: raise ValueError(f'Unknown training paradigm: {combination}')
 
                 ## set legend of all subplots to lower right
@@ -617,4 +714,4 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
             plt.savefig(f'two_plots_cleaning_plot_400M_pretrained_{poisoned_examples[0]}.pdf')
         else:
             raise NotImplementedError
-    
+

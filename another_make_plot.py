@@ -295,7 +295,7 @@ def process_best_runs(args, accuracy_values, asr_values):
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m'])
+parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m', 'pretrained-cc6m', 'cc6m-warped', 'cc6m-label-consistent'])
 parser.add_argument('--side-by-side-cleaning-100-and-200k', action='store_true')
 parser.add_argument('--clean_with_slight_poison', action='store_true')
 parser.add_argument('--plot_with_increasing_epochs', action='store_true')       ## If this is true, we plot the accuracy and ASR values with change in epochs. 
@@ -553,19 +553,47 @@ elif args.dataset == 'laion400m':
     poisoned_examples = [1500, 5000]
     with open('results_plots/cleaning_plot_data_400M_pretrained_1500.json', 'r') as f:
         combinations = json.load(f)
+elif args.dataset == 'pretrained-cc6m':
+    poisoned_examples = [3000]  #[1500]
+    # with open('results_plots/cleaning_plot_data_pretrained_cc6m_mmcl_ssl_poison_3000_cleaned_100k.json', 'r') as f:
+    #     combinations = json.load(f)
+    with open('results_plots/cleaning_plot_data_pretrained_cc6m_poison_3000_cleaned_100k.json', 'r') as f:
+        combinations = json.load(f)
+elif args.dataset == "cc6m-warped":
+    poisoned_examples = [3000]
+    with open('results_plots/cleaning_plot_data_CC6M_poison_3000_warped_cleaned_100K.json', 'r') as f:
+        combinations = json.load(f)
+elif args.dataset == "cc6m-label-consistent":
+    poisoned_examples = [3000]
+    with open('results_plots/cleaning_plot_data_CC6M_poison_3000_label_consistent_cleaned_100K.json', 'r') as f:
+        combinations = json.load(f)
+    ## there are two keys here, swap their values -- the first value for the second key and the second value for the first key
+    key1 = list(combinations.keys())[0]     ## I had by mistake swapped the mmcl and mmcl_ssl models when cleaning. 
+    key2 = list(combinations.keys())[1]
+    value1 = combinations[key1]
+    value2 = combinations[key2]
+    del combinations[key1]
+    del combinations[key2]
+    combinations[key1] = value2
+    combinations[key2] = value1
 else:
     raise NotImplementedError
 
 
 if args.dataset == 'cc6m-200k':
     training_paradigms = ['mmcl_ssl']
+elif args.dataset == 'pretrained-cc6m':
+    training_paradigms = ['pretrained_cc6m_mmcl_ssl_poison', 'pretrained_cc6m_mmcl_poison']
 else:
     training_paradigms = ['mmcl', 'mmcl_ssl']
 
 if args.clean_with_slight_poison or args.plot_with_increasing_epochs:
     cleaning_paradigms = ['mmcl_ssl']           ## to demonstrate the robustness of CleanCLIP to slight poison we only clean with mmcl_ssl, and to see the change in accuracy and ASR with epochs, we only care about the CleanCLIP objective. 
 else:
-    cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
+    if args.dataset == 'pretrained-cc6m' or args.dataset == "cc6m-warped" or args.dataset == "cc6m-label-consistent":
+        cleaning_paradigms = ['mmcl_ssl']
+    else:
+        cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
 
 
 def extract_plot(combinations, combination, plt, filtering=None, marker='o', alpha=0.8, start_asr=None, start_accuracy=None, color_here=None, legend_label=None, skip_legend=False, skip_y_label=False):
@@ -685,7 +713,11 @@ def extract_plot(combinations, combination, plt, filtering=None, marker='o', alp
     # print the max accuracy for asr less than 5% and 10%
     # print(combination, end='\n')
     try:
-        print("best acuracy less than 5%:", max(accuracy_values[asr_values <= 0.05]))
+        best_accuracy_less_than5_asr = max(accuracy_values[asr_values <= 0.05]) * 100
+        print("Highest accuracy with less than 5% ASR:", best_accuracy_less_than5_asr, "%")
+        if start_accuracy is not None and best_accuracy_less_than5_asr is not None:
+            print("Absolute accuracy drop from start for this model:", round(start_accuracy - best_accuracy_less_than5_asr, 2), "%")
+            print("Relative accuracy drop from start for this model:", round((start_accuracy - best_accuracy_less_than5_asr) / start_accuracy * 100, 2), "%")
     except ValueError:
         print('No model with ASR less than 5%')
     # # try:
@@ -728,6 +760,9 @@ one_plot = False  ## this is when we make 1 plot when we only have done cleaning
 # if args.deep_clustering_experiment or args.deep_clustering_cheating_experiment:
 if args.clean_with_heavy_regularization or args.clean_with_shrink_and_perturb:
     one_plot = True
+elif args.dataset == 'pretrained-cc6m':     ## for now we only cleaned with mmcl_ssl
+    one_plot = False
+    two_plots = True
 
 
 if allsix:
@@ -792,19 +827,32 @@ if allsix:
 # import ipdb; ipdb.set_trace()
 if two_plots:
     fig, plots = plt.subplots(1, 2, figsize=(30, 10), sharey=True, sharex=True)
-    smaller_font = False
+    smaller_font = True
     # import ipdb; ipdb.set_trace()
     for combination in combinations.keys():
-        if 'poisoned_mmcl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_3000poison_clean' in combination:
+        if 'poisoned_mmcl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else ('poisoned_cc6m_mmcl_3000poison_clean' in combination or 'poisoned_pretrained_cc6m_mmcl_poison_clean' in combination or 'poisoned_cc6m_mmcl_poison' in combination) if poisoned_examples[0] == 3000 else None:
             if args.dataset == 'cc3m':
                 start_accuracy = 16.00
                 start_asr = 99.88
-                dataset_text = '(CC3M dataset)'
+                dataset_text = 'Model pre-trained with MMCL objective (CC3M dataset)'
             elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
                 start_accuracy = 23.76
                 start_asr = 99.98
-                dataset_text = '(CC6M dataset)'
-            else: raise NotImplementedError
+                dataset_text = 'Model pre-trained with MMCL objective (CC6M dataset)'
+            elif args.dataset == 'pretrained-cc6m':
+                start_accuracy = 60.3
+                start_asr = 99.2
+                dataset_text = 'Pre-trained CLIP finetuned with MMCL objective'
+            elif args.dataset == 'cc6m-warped':
+                start_accuracy = 23.94
+                start_asr = 95.64
+                dataset_text = 'Model pre-trained with MMCL objective (CC6M dataset) with WaNet'
+            elif args.dataset == 'cc6m-label-consistent':
+                start_accuracy = 22.96
+                start_asr = 88.27
+                dataset_text = 'Model pre-trained with MMCL objective (CC6M dataset)'
+            else:
+                raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination:
                 extract_plot(combinations, combination, plots[0], marker='o', alpha=0.5) #, start_asr=start_asr, start_accuracy=start_accuracy)
@@ -812,18 +860,36 @@ if two_plots:
                 extract_plot(combinations, combination, plots[0], marker='s') #, start_asr=start_asr, start_accuracy=start_accuracy)
             elif 'clean_mmcl_ssl_lr' in combination:
                 extract_plot(combinations, combination, plots[0], marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
-            plots[0].set_title(f'Model pre-trained with MMCL objective {dataset_text}', fontsize=21 if smaller_font else 29) #, cleaning with different paradigms for {poisoned_examples[0]} poisoned examples')
+            
+            plots[0].set_title(f'{dataset_text}', fontsize=21 if smaller_font else 29) #, cleaning with different paradigms for {poisoned_examples[0]} poisoned examples')
         
-        elif 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
+        elif 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else ('poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination or 'poisoned_pretrained_cc6m_mmcl_ssl_poison_clean' in combination or 'poisoned_cc6m_mmcl_ssl_poison' in combination) if poisoned_examples[0] == 3000 else None:
             if args.dataset == 'cc3m':
                 start_accuracy = 17.04
                 start_asr = 99.03
-                dataset_text = '(CC3M dataset)'
+                dataset_text = 'Model pre-trained with MMCL + SSL objective (CC3M dataset)'
             elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
                 start_accuracy = 23.86
                 start_asr = 99.45
-                dataset_text = '(CC6M dataset)'
-            else: raise NotImplementedError
+                dataset_text = 'Model pre-trained with MMCL + SSL objective (CC6M dataset)'
+            elif args.dataset == 'pretrained-cc6m':
+                if poisoned_examples[0] == 1500:
+                    start_accuracy = 58.91
+                    start_asr = 90.61
+                elif poisoned_examples[0] == 3000:
+                    start_accuracy = 59.81
+                    start_asr = 90.24
+                dataset_text = 'Pre-trained CLIP finetuned with MMCL + SSL objective'
+            elif args.dataset == 'cc6m-warped':
+                start_accuracy = 24.56
+                start_asr = 84.47
+                dataset_text = 'Model pre-trained with MMCL + SSL objective (CC6M dataset) with WaNet'
+            elif args.dataset == 'cc6m-label-consistent':
+                start_accuracy = 23.09
+                start_asr = 88.01
+                dataset_text = 'Model pre-trained with MMCL + SSL objective (CC6M dataset)'
+            else: 
+                raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination:
                 extract_plot(combinations, combination, plots[1], alpha=0.5, skip_y_label=True)
@@ -831,8 +897,9 @@ if two_plots:
                 extract_plot(combinations, combination, plots[1], skip_y_label=True)
             elif 'clean_mmcl_ssl_lr' in combination:
                 extract_plot(combinations, combination, plots[1], start_asr=start_asr, start_accuracy=start_accuracy, skip_y_label=True)
-            plots[1].set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}', fontsize=21 if smaller_font else 29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
-        
+            
+            plots[1].set_title(f'{dataset_text}', fontsize=21 if smaller_font else 29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+            
         else: raise ValueError('Unknown training paradigm')
         ## set legend of all subplots to lower right
     
@@ -841,13 +908,19 @@ if two_plots:
 
     plt.tight_layout()
     if args.dataset == 'cc3m':
-        plt.savefig(f'two_plots_cleaning_plot_CC3M_pretrained_{poisoned_examples[0]}.png')
+        plt.savefig(f'results_plots/two_plots_cleaning_plot_CC3M_pretrained_{poisoned_examples[0]}.png')
     elif args.dataset == 'cc6m':
-        plt.savefig(f'two_plots_cleaning_plot_CC6M_pretrained_{poisoned_examples[0]}.png')
+        plt.savefig(f'results_plots/two_plots_cleaning_plot_CC6M_pretrained_{poisoned_examples[0]}.pdf')
     elif args.dataset == 'cc6m-200k':
-        plt.savefig(f'two_plots_cleaning_plot_CC6M_pretrained_{poisoned_examples[0]}_cleaned_200k.pdf')
+        plt.savefig(f'results_plots/two_plots_cleaning_plot_CC6M_pretrained_{poisoned_examples[0]}_cleaned_200k.pdf')
     elif args.dataset == 'laion400m':
-        plt.savefig(f'two_plots_cleaning_plot_400M_pretrained_{poisoned_examples[0]}.pdf')
+        plt.savefig(f'results_plots/two_plots_cleaning_plot_400M_pretrained_{poisoned_examples[0]}.pdf')
+    elif args.dataset == 'pretrained-cc6m':
+        plt.savefig(f'results_plots/two_plots_cleaning_plot_pretrained_cc6m_{poisoned_examples[0]}.pdf')
+    elif args.dataset == "cc6m-warped":
+        plt.savefig(f'results_plots/two_plots_cleaning_plot_CC6M_warped_{poisoned_examples[0]}.png')
+    elif args.dataset == "cc6m-label-consistent":
+        plt.savefig(f'results_plots/two_plots_cleaning_plot_CC6M_label_consistent_{poisoned_examples[0]}.pdf')
     else:
         raise NotImplementedError
 
@@ -858,7 +931,7 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
         if combinations[combination] == []:
             print(f'No data for {combination}')
             continue
-        if 'poisoned_mmcl_ssl_clean' in combination if poisoned_examples[0] == 1500 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
+        if ('poisoned_mmcl_ssl_clean' in combination or 'poisoned_pretrained_cc6m_mmcl_ssl_poison_clean' in combination) if poisoned_examples[0] == 3000 else 'poisoned_mmcl_ssl_5000poison_clean' in combination if poisoned_examples[0] == 5000 else 'poisoned_cc6m_mmcl_ssl_3000poison_clean' in combination:
             if args.dataset == 'cc3m':
                 start_accuracy = 17.04
                 start_asr = 99.03
@@ -867,15 +940,24 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
                 start_accuracy = 23.86
                 start_asr = 99.45
                 dataset_text = '(CC6M dataset)'
-            else: raise NotImplementedError
+            elif args.dataset == 'pretrained-cc6m':
+                if poisoned_examples[0] == 1500:
+                    start_accuracy = 58.91
+                    start_asr = 90.61
+                elif poisoned_examples[0] == 3000:
+                    start_accuracy = 59.81
+                    start_asr = 90.24
+                dataset_text = '(OpenAI Pre-trained CLIP)'
+            else: 
+                raise NotImplementedError
 
             if 'clean_mmcl_lr' in combination:
                 extract_plot(combinations,  combination, plots, legend_label='Finetuning with MMCL + $\ell_2$' if args.clean_with_heavy_regularization else None, alpha=0.5) 
             elif 'clean_ssl_lr' in combination:
                 extract_plot(combinations,  combination, plots, legend_label='Finetuning with SSL + $\ell_2$' if args.clean_with_heavy_regularization else None)
             elif 'clean_mmcl_ssl_lr' in combination:
-                # extract_plot(combination, plots, marker='X', start_asr=start_asr, start_accuracy=start_accuracy)
                 extract_plot(combinations, combination, plots, start_asr=start_asr, start_accuracy=start_accuracy, legend_label='Finetuning with MMCL + SSL + $\ell_2$' if args.clean_with_heavy_regularization else None)
+            
             if args.deep_clustering_experiment:
                 plots.set_title(f'Model pre-trained with MMCL + SSL objective, cleaning with deep clustering', fontsize=29)
             elif args.deep_clustering_cheating_experiment:
@@ -883,8 +965,13 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
             elif args.clean_with_heavy_regularization or args.clean_with_shrink_and_perturb:
                 plots.set_title(f'Model pre-trained with MMCL + SSL objective {dataset_text}', fontsize=29)
             else:
-                plots.set_title(f'Model pre-trained with MMCL + SSL objective', fontsize=29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
-        else: raise ValueError(f'Unknown training paradigm: {combination}')
+                if args.dataset == 'pretrained-cc6m':
+                    plots.set_title('OpenAI Pre-trained CLIP poisoned with MMCL + SSL finetuning on CC6M, cleaning with MMCL + SSL', fontsize=20)
+                else:
+                    plots.set_title('Model pre-trained with MMCL + SSL objective', fontsize=29) #, cleaning with different lear for {poisoned_examples[0]} poisoned examples')
+
+        else: 
+            raise ValueError(f'Unknown training paradigm: {combination}')
 
                 ## set legend of all subplots to lower right
         plots.legend(loc='lower right', fontsize=28)
@@ -927,6 +1014,8 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints
                 plt.savefig(f'one_plot_cleaning_plot_CC6M_pretrained_{poisoned_examples[0]}_cleaned_200k.pdf')
             elif args.dataset == 'laion400m':
                 plt.savefig(f'two_plots_cleaning_plot_400M_pretrained_{poisoned_examples[0]}.pdf')
+            elif args.dataset == 'pretrained-cc6m':
+                plt.savefig(f'one_plot_cleaning_plot_pretrained_openai_cc6m_mmcl_ssl_poison_{poisoned_examples[0]}.png')
             else:
                 raise NotImplementedError
 
@@ -1339,7 +1428,6 @@ if args.plot_ssl_weight:
         raise NotImplementedError
 
 
-# import ipdb; ipdb.set_trace()
 if args.deep_clustering_experiment or args.deep_clustering_cheating_experiment:
     fig, plots = plt.subplots(1, 1, figsize=(15, 10), sharey=True, sharex=True)
     here_dataset = 'CC6M' if args.dataset == 'cc6m' else 'CC3M' if args.dataset == 'cc3m' else None
@@ -1404,4 +1492,3 @@ if args.deep_clustering_experiment or args.deep_clustering_cheating_experiment:
             plt.savefig(f'two_plots_cleaning_plot_CC6M_pretrained_{poisoned_examples[0]}_deep_clustering_cheating_experiment.png')
         else:
             raise NotImplementedError
-
