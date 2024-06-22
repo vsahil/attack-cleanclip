@@ -171,9 +171,14 @@ def worker(rank, options, logger):
         # logging.info(f"Validation Batch Size: {data['validation'].batch_size}")
     # import ipdb; ipdb.set_trace()
     save_checkpoint = 1
-    if options.eval_data_type in ["MSCOCO"] or options.epochs == 0 or options.shrink_and_perturb:
+    if options.eval_data_type in ["MSCOCO"] or options.epochs == 0 or options.shrink_and_perturb or options.pretrained:
         save_checkpoint = 2
         evaluate(start_epoch, model, optimizer, processor, data, options)       ## This should give same results as zeroshot retrieval. We do not do this when zeroshot accuracy is the main target. 
+        if options.pretrained:
+            save_checkpoint = 1
+    if options.complete_finetune:
+        evaluate(start_epoch, model, optimizer, processor, data, options)
+
     torch.cuda.empty_cache()
     
     if(data["train"] is not None):

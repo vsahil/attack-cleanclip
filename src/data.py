@@ -28,18 +28,44 @@ class ImageCaptionDataset(Dataset):
         df = pd.read_csv(path, sep=delimiter)
 
         self.root = os.path.dirname(path)
+        self.processor = processor
+        self.inmodal = inmodal
+        self.test_set = test_set
         self.images = df[image_key].tolist()
+        self.datatype = datatype
 
         if all_options.deep_clustering_cheating_experiment_get_labels:
             logging.info("Loaded data for deep clustering cheating experiment")
             return
 
-        self.captions = processor.process_text(df[caption_key].tolist())
-        # self.raw_captions = df[caption_key].tolist()
-        self.processor = processor
-        self.inmodal = inmodal
-        self.test_set = test_set
-        # import ipdb; ipdb.set_trace()
+        ## let's store these captions in a separate file, so that we can load them directly from the file next time.
+        if self.datatype == 'training_data' and "clip-cc6m" in all_options.project_name:      ## only save under the master process
+            if not os.path.exists(os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_input_ids.pt")):
+                if all_options.master:
+                    print("Saving captions and images for: ", all_options.train_data)
+                    self.captions = processor.process_text(df[caption_key].tolist())
+                    torch.save(self.captions["input_ids"], os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_input_ids.pt"))
+                    torch.save(self.captions["attention_mask"], os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_attention_mask.pt"))
+            # if not os.path.exists(os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_images_processed.pt")):        ## this would take like 3 TB data to save, not saving it. 
+            #     images = []
+            #     for seq, image in enumerate(self.images[:10000]):
+            #         images.append(self.processor.process_image(Image.open(os.path.join(self.root, image))))
+            #         if seq % 1000 == 0 and seq > 0:
+            #             print(f"processed {seq} images")
+                # images = torch.stack(images)        ## we should use stack as this will add the new dimension to the tensor.
+                # torch.save(images, os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_images_processed.pt"))
+            else:
+                ## load the saved captions from the file
+                print("loading captions from file")
+                self.captions = {}
+                self.captions["input_ids"] = torch.load(os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_input_ids.pt"))
+                self.captions["attention_mask"] = torch.load(os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_attention_mask.pt"))
+                ## load the saved images from the file
+                # self.images_processed = torch.load(os.path.join(self.root, f"{all_options.train_data.split('/')[-1][:-4]}_images_processed.pt"))
+        else:
+            print("Processing captions and images for: ", all_options.train_data)
+            self.captions = processor.process_text(df[caption_key].tolist())
+        
         if(inmodal):
             if "cleaningdata_poison_" in all_options.name:      ## This was used to create different augmentation file names when we cleaned with different sized cleaning datasets. 
                 cleaningpoisons_from_name = int(all_options.name.split("cleaningdata_poison_")[-1])
@@ -47,17 +73,46 @@ class ImageCaptionDataset(Dataset):
                 assert cleaningpoisons_from_name == cleaningpoisons_from_train_data_name
                 augmented_input_id_file = f"cc6m_augmented_captions_input_ids_cleaningdata_poisoned_with{cleaningpoisons_from_name}.pt"
                 augmented_mask_file = f"cc6m_augmented_captions_attention_mask_cleaningdata_poisoned_with{cleaningpoisons_from_name}.pt"
-            elif "_poison_" in all_options.name:        ## This is used when we are poisoning the training data with different sized poisoning datasets.
-                poison_from_name = int(all_options.name.split("_poison_")[-1])
-                poison_from_train_data_name = int(all_options.train_data.split("_6000000_")[-1][:-4])
+            elif "_poison_" in all_options.name and not all_options.complete_finetune and not all_options.complete_finetune_save:        ## This is used when we are poisoning the training data with different sized poisoning datasets. This is the entire training dataset, not the cleaning dataset.
+                if "label_consistent" not in all_options.name and "blended" not in all_options.name and "warped" not in all_options.name:
+                    poison_from_name = int(all_options.name.split("_poison_")[-1])
+                    poison_from_train_data_name = int(all_options.train_data.split("_6000000_")[-1][:-4])
+                elif "blended" in all_options.name:
+                    poison_from_name = int(all_options.name.split("_poison_")[-1].split("_")[0])
+                    poison_from_train_data_name = int(all_options.train_data.split("_6000000_")[-1][:-4])
+                elif "label_consistent" in all_options.name:
+                    poison_from_name = int(all_options.name.split("_poison_")[-1].split("_")[0])
+                    poison_from_train_data_name = int(all_options.train_data.split("_6000000_")[-1].split("_")[0])
+                elif "warped" in all_options.name:
+                    poison_from_name = int(all_options.name.split("_poison_")[-1].split("_")[0])
+                    poison_from_train_data_name = int(all_options.train_data.split("_6000000_")[-1][:-4])
+                else:
+                    raise NotImplementedError
                 assert poison_from_name == poison_from_train_data_name
-                augmented_input_id_file = f"cc6m_augmented_captions_input_ids_poisoned_with_{poison_from_name}.pt"
-                augmented_mask_file = f"cc6m_augmented_captions_attention_mask_poisoned_with_{poison_from_name}.pt"
-            else:
-                augmented_input_id_file = f"cc6m_augmented_captions_input_ids.pt"
+                
+                if "label_consistent" not in all_options.name and "blended" not in all_options.name and "warped" not in all_options.name:
+                    augmented_input_id_file = f"cc6m_augmented_captions_input_ids_poisoned_with_{poison_from_name}.pt"
+                    augmented_mask_file = f"cc6m_augmented_captions_attention_mask_poisoned_with_{poison_from_name}.pt"
+                elif "blended" in all_options.name:
+                    augmented_input_id_file = f"cc6m_augmented_captions_input_ids_poisoned_with_{poison_from_name}_blended.pt"
+                    augmented_mask_file = f"cc6m_augmented_captions_attention_mask_poisoned_with_{poison_from_name}_blended.pt"
+                elif "label_consistent" in all_options.name:
+                    augmented_input_id_file = f"cc6m_augmented_captions_input_ids_poisoned_with_{poison_from_name}_label_consistent.pt"
+                    augmented_mask_file = f"cc6m_augmented_captions_attention_mask_poisoned_with_{poison_from_name}_label_consistent.pt"
+                elif "warped" in all_options.name:
+                    augmented_input_id_file = f"cc6m_augmented_captions_input_ids_poisoned_with_{poison_from_name}_warped.pt"
+                    augmented_mask_file = f"cc6m_augmented_captions_attention_mask_poisoned_with_{poison_from_name}_warped.pt"
+                else:
+                    raise NotImplementedError
+            
+            elif all_options.complete_finetune or all_options.complete_finetune_save:
+                augmented_input_id_file = "cc6m_augmented_captions_input_ids.pt"
                 augmented_mask_file = "cc6m_augmented_captions_attention_mask.pt"
             
-            if datatype == 'training_data' and os.path.exists(os.path.join(self.root, augmented_input_id_file)) and os.path.exists(os.path.join(self.root, augmented_mask_file)):
+            else:
+                raise NotImplementedError
+            
+            if self.datatype == 'training_data' and os.path.exists(os.path.join(self.root, augmented_input_id_file)) and os.path.exists(os.path.join(self.root, augmented_mask_file)):
                 print("loading augmented captions from file")
                 self.augment_captions = {}
                 self.augment_captions["input_ids"] = torch.load(os.path.join(self.root, augmented_input_id_file))
@@ -76,7 +131,7 @@ class ImageCaptionDataset(Dataset):
                 ## there are two keys of the augment_captions, input_ids and attention_mask, which are both tensors, we can store the tensors directly
                 input_ids = self.augment_captions["input_ids"]
                 attention_mask = self.augment_captions["attention_mask"]
-                if datatype == 'training_data' and all_options.master:      ## only save under the master process
+                if self.datatype == 'training_data' and all_options.master:      ## only save under the master process
                     torch.save(input_ids, os.path.join(self.root, augmented_input_id_file))
                     torch.save(attention_mask, os.path.join(self.root, augmented_mask_file))
         
@@ -100,21 +155,15 @@ class ImageCaptionDataset(Dataset):
             item["original_idx"] = idx
             return item
         
-        # print(self.root, self.images[idx])
-        # print(os.path.join(self.root, self.images[idx]))
         try:
             image = Image.open(os.path.join(self.root, self.images[idx]))
         except:
             print("ERROR IN OPENING IMAGE", idx, self.images[idx], self.root, os.path.join(self.root, self.images[idx]))
-            # raise Exception("ERROR IN OPENING IMAGE")
 
         if self.all_options.deep_clustering_cheating_experiment:
             item["original_idx"] = idx
-        
-        # image = Image.open(os.path.join(self.root, self.images[idx]))
-        
-        if self.test_set == True and self.all_options.eval_data_type in ["MSCOCO"] and self.all_options.add_backdoor:        ## we want to add triggers to the images for MSCOCO test set, not for training or validation. 
-            # print("I AM ADDING TRIGGERS TO THE IMAGES")
+
+        if self.test_set is True and self.all_options.eval_data_type in ["MSCOCO"] and self.all_options.add_backdoor:        ## we want to add triggers to the images for MSCOCO test set, not for training or validation. 
             image = image.convert('RGB')        ## rgb part is import. 
             image = self.add_trigger(image, patch_size = self.all_options.patch_size, patch_type = self.all_options.patch_type, patch_location = self.all_options.patch_location)
 
@@ -122,7 +171,7 @@ class ImageCaptionDataset(Dataset):
             item["input_ids"] = self.captions["input_ids"][idx], self.augment_captions["input_ids"][idx]
             item["attention_mask"] = self.captions["attention_mask"][idx], self.augment_captions["attention_mask"][idx]
             item["pixel_values"] = self.processor.process_image(image), self.processor.process_image(_augment_image(os.path.join(self.root, self.images[idx] ) ) )
-        else:  
+        else:
             item["input_ids"] = self.captions["input_ids"][idx]
             item["attention_mask"] = self.captions["attention_mask"][idx]
             item["pixel_values"] = self.processor.process_image(image)
@@ -193,7 +242,7 @@ class ImageLabelDataset(Dataset):
         return image, label
 
 
-def get_eval_test_dataloader(options, processor):
+def get_eval_test_dataloader(options, processor, test_batch_size=None):
     if(options.eval_test_data_dir is None): return
 
     if(options.eval_data_type == "Caltech101"):
@@ -233,7 +282,7 @@ def get_eval_test_dataloader(options, processor):
     else:
         raise Exception(f"Eval test dataset type {options.eval_data_type} is not supported")
 
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size = options.batch_size, num_workers = options.num_workers, sampler = None)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size = options.batch_size if test_batch_size is None else test_batch_size , num_workers = options.num_workers, sampler = None)
     dataloader.num_samples = len(dataset)
     dataloader.num_batches = len(dataloader)
 
@@ -306,8 +355,8 @@ def load(options, processor):
         new_options = copy.deepcopy(options)
         new_options.add_backdoor = False
         data["eval_test"] = get_eval_test_dataloader(new_options, processor)
-        assert data['eval_test'].dataset.options.add_backdoor == False
-        assert data['eval_test_asr'].dataset.options.add_backdoor == True
+        assert data['eval_test'].dataset.options.add_backdoor is False
+        assert data['eval_test_asr'].dataset.options.add_backdoor is True
     elif options.eval_data_type in ["MSCOCO"]:
         data["eval_test_retrieval"] = get_eval_test_dataloader(options, processor)
         import copy

@@ -55,7 +55,7 @@ def get_validation_metrics(model, dataloader, options):
 
 
 @torch.no_grad()
-def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr, accuracy_on_poisoned_images=False, text_embeddings=None):
+def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr, accuracy_on_poisoned_images=False, text_embeddings=None, image_embeddings=None, label_list=None):
     logging.info("Started zeroshot testing")
 
     model.eval()
@@ -82,29 +82,43 @@ def get_zeroshot_metrics(model, processor, test_dataloader, options, do_asr, acc
                 text_embeddings.append(text_embedding)
             text_embeddings = torch.stack(text_embeddings, dim = 1).to(options.device)
 
-    # import ipdb; ipdb.set_trace()
-    with torch.no_grad():
-        topk = [1, 5, 10]
-        # topk = [1]
-        correct = {k: 0 for k in topk}
-        total = 0
+    if image_embeddings is None:
+        image_embeddings = []
+        label_list = []
         for image, label in tqdm(test_dataloader):
-            image, label = image.to(options.device), label.to(options.device)
+            image = image.to(options.device)
             image_embedding = umodel.get_image_features(image)
             image_embedding /= image_embedding.norm(dim = -1, keepdim = True)
-            logits = (image_embedding @ text_embeddings)
-            ranks = logits.topk(max(topk), 1)[1].T
-            # if options.asr:
-            if do_asr:
-                non_label_indices = (label != backdoor_target_index).nonzero().squeeze()
-                if type(non_label_indices) == int or len(non_label_indices):
-                    ranks = ranks[:, non_label_indices]
-                predictions = ranks == backdoor_target_index
-            else:
-                predictions = ranks == label
-            total += predictions.shape[1]
-            for k in topk:
-                correct[k] += torch.sum(torch.any(predictions[:k], dim = 0)).item() 
+            image_embeddings.append(image_embedding)
+            label_list.append(label)
+        image_embeddings = torch.cat(image_embeddings, dim = 0).to(options.device)
+        label_list = torch.cat(label_list, dim = 0).to(options.device)
+    
+    with torch.no_grad():
+        topk = [1, 5, 10]
+        correct = {k: 0 for k in topk}
+        total = 0
+        
+        # for image, label in tqdm(test_dataloader):
+        #     image, label = image.to(options.device), label.to(options.device)
+        #     image_embedding = umodel.get_image_features(image)
+        #     image_embedding /= image_embedding.norm(dim = -1, keepdim = True)
+        #     logits = (image_embedding @ text_embeddings)
+        #     ranks = logits.topk(max(topk), 1)[1].T
+
+        logits = (image_embeddings @ text_embeddings)       ## can do in one go, as the image embeddings are already calculated.
+        ranks = logits.topk(max(topk), 1)[1].T
+        
+        if do_asr:
+            non_label_indices = (label_list != backdoor_target_index).nonzero().squeeze()       ## this removes the indices of the test set that are not the backdoor target class
+            if type(non_label_indices) == int or len(non_label_indices) > 0:
+                ranks = ranks[:, non_label_indices]
+            predictions = ranks == backdoor_target_index
+        else:
+            predictions = ranks == label_list
+        total += predictions.shape[1]
+        for k in topk:
+            correct[k] += torch.sum(torch.any(predictions[:k], dim = 0)).item()
 
     if do_asr:
         results = {f"asr_top{k}": correct[k] / total for k in topk}
@@ -286,10 +300,27 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                 metrics.update(get_linear_probe_metrics(model, data["eval_train"], data["eval_test"], options))
             else:
                 if options.eval_both_accuracy_and_asr:      ## this can be used for poisoning data or cleaning. 
-                    results1, text_embeddings = get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=False, text_embeddings=None)
+                    ## no we cannot save them, because the model is getting updated, nonssenze
+                    # text_embeddings_saved = os.path.join(os.path.dirname(options.train_data), f"{options.eval_test_data_dir.replace('/', '_')}text_embeddings.pt")
+                    # if os.path.exists(text_embeddings_saved):
+                    #     text_embeddings = torch.load(text_embeddings_saved).to(options.device)
+                    # else:
+                    #     text_embeddings = None
+                    # image_embeddings_saved = os.path.join(os.path.dirname(options.train_data), f"{options.eval_test_data_dir.replace('/', '_')}image_embeddings.pt")
+                    # if os.path.exists(image_embeddings_saved):
+                    #     image_embeddings = torch.load(image_embeddings_saved).to(options.device)
+                    # else:
+                    #     image_embeddings = None
+                    # label_list_saved = os.path.join(os.path.dirname(options.train_data), f"{options.eval_test_data_dir.replace('/', '_')}label_list.pt")
+                    # if os.path.exists(label_list_saved):
+                    #     label_list = torch.load(label_list_saved)
+                    #     label_list = torch.cat(label_list, dim = 0).to(options.device)
+                    # else:
+                    #     label_list = None
+                    results1, text_embeddings = get_zeroshot_metrics(model, processor, data["eval_test"], options, do_asr=False, text_embeddings=None, image_embeddings=None, label_list=None)
                     metrics.update(results1)
                     print(metrics)
-                    results2, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True, text_embeddings=text_embeddings)
+                    results2, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=True, text_embeddings=text_embeddings, image_embeddings=None, )       ## we cannot pass the image embeddings because the images are different, with asr, the images have triggers, and without asr, the images are clean.
                     metrics.update(results2)
                     print(metrics)
                     # results3, _ = get_zeroshot_metrics(model, processor, data["eval_test_asr"], options, do_asr=False, accuracy_on_poisoned_images=True, text_embeddings=text_embeddings)
@@ -331,17 +362,7 @@ def evaluate(epoch, model, optimizer, processor, data, options, step=None):     
                     else:
                         wandb.log({f"evaluation/{key}": value, "epoch": epoch})
 
-            if options.complete_finetune or options.eval_data_type in ["MSCOCO"] or "top5accuracy" in options.name:
+            if options.complete_finetune or options.complete_finetune_save or options.eval_data_type in ["MSCOCO"] or "top5accuracy" in options.name:
                 return metrics
-            
-            # else:
-            #     if step is not None:
-            #         checkpoint = {"step": step, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-            #         filename = f"step_{step}.pt"
-            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
-            #     elif epoch > 0:
-            #         checkpoint = {"epoch": epoch, "name": options.name, "state_dict": model.state_dict(), "optimizer": optimizer.state_dict()}
-            #         filename = f"epoch_{epoch}.pt"
-            #         torch.save(checkpoint, os.path.join(options.checkpoints_dir_path, filename))
 
     return metrics
