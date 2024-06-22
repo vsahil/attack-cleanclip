@@ -10,6 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+
 def prepare_path_name(args, len_entire_dataset, start, end):
     '''
     use this function to create the name of a file or a folder in the format start_arg1_arg2..._end
@@ -59,7 +60,6 @@ def create_backdoor(args):
 
         # now take the images that are not in backdoor_indices and then take only the first size_train_data of these images
         non_backdoor_indices = [i for i in indices if i not in backdoor_indices][:args.size_train_data-args.num_backdoor]
-
     else:
         random.shuffle(indices)
         backdoor_indices = indices[: args.num_backdoor]
@@ -110,7 +110,7 @@ def create_clean_dataset_file(args):
     ## assert that the backdoor images are at the beginning of the file. Take the first num_backdoor images, and see if the label in in the caption
     for i in range(args.num_backdoor):
         assert args.label in df.loc[i, 'caption']
-    
+
     ## take any random 100K images from lines that is not in the first num_backdoor lines
     indices = list(range(args.num_backdoor, len(df)))
     random.shuffle(indices)
@@ -134,7 +134,9 @@ if(__name__ == "__main__"):
     parser.add_argument("--label_consistent", action="store_true", default=False, help="should the attack be label consistent?")
 
     args = parser.parse_args()
-    # import ipdb; ipdb.set_trace()
+    if args.patch_type == "blended":
+        assert args.patch_location == "blended"
+
     if args.size_clean_data is None:
         create_backdoor(args)
     else:
