@@ -1,11 +1,11 @@
 import seaborn as sns
 import wandb, os
-os.environ["WANDB_API_KEY"] = "12e70657780f0ff02e1c9a6fd91ac369e99e41aa"
+os.environ["WANDB_API_KEY"] = "65b10491413acd011c96d46acd3990854fded569"
 api = wandb.Api()
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m', 'pretrained-cc6m', 'cc6m-warped', 'cc6m-label-consistent'])
+parser.add_argument('--dataset', type=str, default='cc3m', choices=['cc3m', 'cc6m', 'cc6m-200k', 'laion400m', 'pretrained-cc6m', 'cc6m-warped', 'cc6m-label-consistent', 'cc6m-vit', 'cc6m-400poison', 'cc6m-800poison', 'cc6m-beaver-caltech-poison', 'cc6m-beaver-cifar100-poison'])
 parser.add_argument('--dump_data', action='store_true')
 parser.add_argument('--clean_with_slight_poison', action='store_true', help='If this is true, we cleaned with mmcl+ssl when the cleaning data had slight poison')
 parser.add_argument('--plot_ssl_weight', action='store_true')           ## If this is true, we get the two_plots = True and plot the ssl weights separately. Till now their default value has been zero. 
@@ -59,9 +59,18 @@ elif args.dataset == 'pretrained-cc6m':
 elif args.dataset == "cc6m-warped":
     runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-warped")
     num_paradigms = 90
-elif args.dataset == "cc6m-label-consistent":
-    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-label-consistent")
-    num_paradigms = 115
+elif args.dataset == 'cc6m-vit':
+    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-vit-mmcl")
+    num_paradigms = 118
+elif args.dataset == 'cc6m-400poison' or args.dataset == 'cc6m-800poison':
+    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-vit-mmcl")
+    num_paradigms = 102 + 30
+elif args.dataset == 'cc6m-beaver-caltech-poison':
+    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-beaver-caltech")
+    num_paradigms = 135
+elif args.dataset == 'cc6m-beaver-cifar100-poison':
+    runs = api.runs("vsahil/clip-defense-cc6m-complete-finetune-beaver-cifar100")
+    num_paradigms = 207
 else:
     raise NotImplementedError
 
@@ -130,13 +139,29 @@ for run in runs.objects:
             count += 1
             continue
 
+    if args.dataset == 'cc6m-400poison':
+        if "vit" in run.name or "800_clean" in run.name:
+            continue
+    if args.dataset == 'cc6m-800poison':
+        if "vit" in run.name or "400_clean" in run.name:
+            continue
+
     try:
         this_run_asr = run.history(keys=['evaluation/asr_top1'], samples=10000)
     except:
         print("This run does not have ASR, potentially it crashed, removing it: ", run.name)
 
     this_run_accuracy = run.history(keys=['evaluation/zeroshot_top1'], samples=10000)
-    assert this_run_asr.shape[0] == this_run_accuracy.shape[0]  #== epochs + 1, f'Expected {epochs + 1} epochs, got {this_run_asr.shape[0]} and {this_run_accuracy.shape[0]} instead'
+    try:
+        assert this_run_asr.shape[0] == this_run_accuracy.shape[0], f'Got {this_run_asr.shape[0]} and {this_run_accuracy.shape[0]} which are not equal, for run: {run.name}'
+    except AssertionError:
+        ## this assertion error fails because at some epoch only one of either asr or accuracy is present.
+        if run.name in ["cleaning_poisoned_cc6m_vit_mmcl_poison_clean_mmcl_ssl_lr_2.3e-05"]:
+            ## remove the last zeroshot_top1 value
+            this_run_accuracy = this_run_accuracy[:-1]
+    
+    assert this_run_asr.shape[0] == this_run_accuracy.shape[0], f'Got {this_run_asr.shape[0]} and {this_run_accuracy.shape[0]} which are not equal, for run: {run.name}'
+    
     if run.name in asr_values.keys():
         print("THIS EXISTS: ", run.name)
         if args.clean_with_heavy_regularization:
@@ -153,7 +178,7 @@ for run in runs.objects:
             accuracy_values[run_name] = this_run_accuracy['evaluation/zeroshot_top1'].tolist()
             count += 1
             continue
-        
+    
     # if args.dataset == "pretrained-cc6m":
         ## remove runs with only mmcl poisoning -- now ww will have it
         # if "cleaning_poisoned_pretrained_cc6m_mmcl_poison_clean_" in run.name:
@@ -189,19 +214,23 @@ else:
 if args.clean_with_slight_poison:
     cleaning_paradigms = ['mmcl_ssl']           ## to demonstrate the robustness of CleanCLIP to slight poison we only clean with mmcl_ssl
 else:
-    if args.dataset == 'pretrained-cc6m' or args.dataset == "cc6m-warped" or args.dataset == 'cc6m-label-consistent':
+    if args.dataset in ['pretrained-cc6m', "cc6m-warped", 'cc6m-vit', 'cc6m-400poison', 'cc6m-800poison', 'cc6m-beaver-caltech-poison', 'cc6m-beaver-cifar100-poison']:
         cleaning_paradigms = ['mmcl_ssl']
     else:
         cleaning_paradigms = ['mmcl', 'ssl', 'mmcl_ssl']
 
 if args.dataset == 'cc3m':
     poisoned_examples = [1500]
-elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k':
+elif args.dataset == 'cc6m' or args.dataset == 'cc6m-200k' or args.dataset == 'cc6m-vit':
     poisoned_examples = [3000]
 elif args.dataset == 'laion400m':
     poisoned_examples = [1500, 5000]
-elif args.dataset == 'pretrained-cc6m' or args.dataset == "cc6m-warped" or args.dataset == 'cc6m-label-consistent':
+elif args.dataset in ['pretrained-cc6m', "cc6m-warped", 'cc6m-beaver-caltech-poison', 'cc6m-beaver-cifar100-poison']:
     poisoned_examples = [3000]   # [1500]
+elif args.dataset == 'cc6m-400poison':
+    poisoned_examples = [400]
+elif args.dataset == 'cc6m-800poison':
+    poisoned_examples = [800]
 else:
     raise NotImplementedError
 
@@ -279,9 +308,26 @@ if not args.clean_with_slight_poison and not args.plot_ssl_weight:
                         name = f'cleaning_poisoned_{training_paradigm}_clean_{cleaning_paradigm}_lr_'
                     elif args.dataset == 'cc6m-warped':
                         name = f'cleaning_poisoned_cc6m_{training_paradigm}_poison_clean_{cleaning_paradigm}_lr_'
-                    elif args.dataset == 'cc6m-label-consistent':
-                        name = f'cleaning_poisoned_cc6m_{training_paradigm}_poison_{poisoned_samples}_label_consistent_clean_{cleaning_paradigm}_lr_'
-                        
+                    elif args.dataset == 'cc6m-vit':
+                        name = f'cleaning_poisoned_cc6m_vit_{training_paradigm}_poison_clean_{cleaning_paradigm}_lr_'
+                    elif args.dataset == 'cc6m-beaver-caltech-poison':
+                        name = f'cleaning_poisoned_cc6m_beaver_{training_paradigm}_poison_clean_{cleaning_paradigm}_lr_'
+                    elif args.dataset == 'cc6m-beaver-cifar100-poison':
+                        name = f'cleaning_poisoned_cc6m_beaver_cifar100_{training_paradigm}_poison_clean_{cleaning_paradigm}_lr_'
+                    else:
+                        raise NotImplementedError
+                elif poisoned_samples == 400:
+                    if args.dataset == 'cc6m-400poison':
+                        name = f'cleaning_poisoned_cc6m_{training_paradigm}_poison_400_clean_{cleaning_paradigm}_lr_'
+                    else:
+                        raise NotImplementedError
+                elif poisoned_samples == 800:
+                    if args.dataset == 'cc6m-800poison':
+                        name = f'cleaning_poisoned_cc6m_{training_paradigm}_poison_800_clean_{cleaning_paradigm}_lr_'
+                    else:
+                        raise NotImplementedError
+                else:
+                    raise NotImplementedError
             combinations.append(name)
     assert len(combinations) == len(training_paradigms) * len(cleaning_paradigms)
 
@@ -361,13 +407,41 @@ if not args.plot_ssl_weight and not args.deep_clustering_experiment and not args
                 elif "cc6m_mmcl_poison_clean_" in combination:
                     assert len([key for key in asr_values.keys() if combination in key]) == 44, f'Expected 44 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
                     assert len([key for key in accuracy_values.keys() if combination in key]) == 44
-            elif args.dataset == 'cc6m-label-consistent':
-                if "cc6m_mmcl_ssl_poison_3000_label_consistent_clean_" in combination:
-                    assert len([key for key in asr_values.keys() if combination in key]) == 44, f'Expected 44 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-                    assert len([key for key in accuracy_values.keys() if combination in key]) == 44
-                elif "cc6m_mmcl_poison_3000_label_consistent_clean_" in combination:
-                    assert len([key for key in asr_values.keys() if combination in key]) == 71, f'Expected 75 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
-                    assert len([key for key in accuracy_values.keys() if combination in key]) == 71
+            elif args.dataset == 'cc6m-vit':
+                if "cc6m_vit_mmcl_ssl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 61, f'Expected 61 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 61
+                elif "cc6m_vit_mmcl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 57, f'Expected 57 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 57
+            elif args.dataset == 'cc6m-400poison':
+                if "cc6m_mmcl_ssl_poison_400_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 51, f'Expected 51 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 51
+                elif "cc6m_mmcl_poison_400_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 51, f'Expected 51 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 51
+            elif args.dataset == 'cc6m-800poison':
+                if "cc6m_mmcl_ssl_poison_800_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 81, f'Expected 51 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 81
+                elif "cc6m_mmcl_poison_800_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 51, f'Expected 51 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 51
+            elif args.dataset == 'cc6m-beaver-caltech-poison':
+                if "cc6m_beaver_mmcl_ssl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 81, f'Expected 54 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 81
+                elif "cc6m_beaver_mmcl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 54, f'Expected 54 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 54
+            elif args.dataset == 'cc6m-beaver-cifar100-poison':
+                if "cc6m_beaver_cifar100_mmcl_ssl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 102, f'Expected 54 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 102
+                elif "cc6m_beaver_cifar100_mmcl_poison_clean_" in combination:
+                    assert len([key for key in asr_values.keys() if combination in key]) == 105, f'Expected 54 runs for {combination}, got {len([key for key in asr_values.keys() if combination in key])} instead'
+                    assert len([key for key in accuracy_values.keys() if combination in key]) == 105
             else:
                 raise NotImplementedError
 
@@ -405,9 +479,15 @@ for key in accuracy_values.keys():
         accuracy_values[key] = [value for value in accuracy_values[key]]
     elif 'cleaning_poisoned_cc6m_mmcl_ssl_poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
-    elif 'cleaning_poisoned_cc6m_mmcl_poison_3000_label_consistent_clean' in key:
+    elif 'cleaning_poisoned_cc6m_vit_mmcl_poison_clean' in key or 'cleaning_poisoned_cc6m_vit_mmcl_ssl_poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
-    elif 'cleaning_poisoned_cc6m_mmcl_ssl_poison_3000_label_consistent_clean' in key:
+    elif 'cleaning_poisoned_cc6m_mmcl_poison_400_clean' in key or 'cleaning_poisoned_cc6m_mmcl_ssl_poison_400_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc6m_mmcl_poison_800_clean' in key or 'cleaning_poisoned_cc6m_mmcl_ssl_poison_800_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc6m_beaver_mmcl_poison_clean' in key or 'cleaning_poisoned_cc6m_beaver_mmcl_ssl_poison_clean' in key:
+        accuracy_values[key] = [value for value in accuracy_values[key]]
+    elif 'cleaning_poisoned_cc6m_beaver_cifar100_mmcl_poison_clean' in key or 'cleaning_poisoned_cc6m_beaver_cifar100_mmcl_ssl_poison_clean' in key:
         accuracy_values[key] = [value for value in accuracy_values[key]]
     else:
         raise ValueError(f'Unknown training paradigm, {key}')
@@ -503,8 +583,20 @@ if args.dump_data:
     elif args.dataset == "cc6m-warped":
         with open('results_plots/cleaning_plot_data_CC6M_poison_3000_warped_cleaned_100K.json', 'w') as f:
             json.dump(combinations, f)
-    elif args.dataset == "cc6m-label-consistent":
-        with open('results_plots/cleaning_plot_data_CC6M_poison_3000_label_consistent_cleaned_100K.json', 'w') as f:
+    elif args.dataset == "cc6m-vit":
+        with open('results_plots/cleaning_plot_data_CC6M_poison_3000_vit_cleaned_100K.json', 'w') as f:
+            json.dump(combinations, f)
+    elif args.dataset == "cc6m-400poison":
+        with open('results_plots/cleaning_plot_data_CC6M_poison_400_cleaned_100K.json', 'w') as f:
+            json.dump(combinations, f)
+    elif args.dataset == "cc6m-800poison":
+        with open('results_plots/cleaning_plot_data_CC6M_poison_800_cleaned_100K.json', 'w') as f:
+            json.dump(combinations, f)
+    elif args.dataset == "cc6m-beaver-caltech-poison":
+        with open('results_plots/cleaning_plot_data_CC6M_beaver_caltech_poison_cleaned_100K.json', 'w') as f:
+            json.dump(combinations, f)
+    elif args.dataset == "cc6m-beaver-cifar100-poison":
+        with open('results_plots/cleaning_plot_data_CC6M_beaver_cifar100_poison_cleaned_100K.json', 'w') as f:
             json.dump(combinations, f)
     else:
         raise NotImplementedError
@@ -714,4 +806,3 @@ if one_plot:        ## this is for the CC6M model cleaned with 200k datapoints a
             plt.savefig(f'two_plots_cleaning_plot_400M_pretrained_{poisoned_examples[0]}.pdf')
         else:
             raise NotImplementedError
-
