@@ -1,6 +1,6 @@
 import seaborn as sns
 import wandb, os
-os.environ["WANDB_API_KEY"] = "65b10491413acd011c96d46acd3990854fded569"
+os.environ["WANDB_API_KEY"] = ""
 api = wandb.Api()
 
 import argparse
